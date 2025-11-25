@@ -2,15 +2,40 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, ChevronRight, Package, Heart, MapPin, CreditCard, Settings, LogOut } from 'lucide-react';
 import Button from '../components/Button';
-import { supabase } from '../supabaseClient'; // 引入 Supabase 客户端
+import { supabase } from '../supabaseClient';
 
-// --- 账户设置列表数据 ---
+// --- 更新：为每个选项配置路由路径 ---
 const ACCOUNT_LINKS = [
-  { title: "My Orders", desc: "Track, return, or buy again", icon: <Package size={20} /> },
-  { title: "Wishlist", desc: "Your saved favourites", icon: <Heart size={20} /> },
-  { title: "Addresses", desc: "Manage delivery locations", icon: <MapPin size={20} /> },
-  { title: "Payment Methods", desc: "Manage cards and billing", icon: <CreditCard size={20} /> },
-  { title: "Preferences", desc: "Notification settings", icon: <Settings size={20} /> }
+  { 
+    title: "My Orders", 
+    desc: "Track, return, or buy again", 
+    icon: <Package size={20} />, 
+    path: '/profile/orders' 
+  },
+  { 
+    title: "Wishlist", 
+    desc: "Your saved favourites", 
+    icon: <Heart size={20} />, 
+    path: '/profile/wishlist' 
+  },
+  { 
+    title: "Addresses", 
+    desc: "Manage delivery locations", 
+    icon: <MapPin size={20} />, 
+    path: '/profile/addresses' 
+  },
+  { 
+    title: "Payment Methods", 
+    desc: "Manage cards and billing", 
+    icon: <CreditCard size={20} />, 
+    path: '/profile/payments' 
+  },
+  { 
+    title: "Preferences", 
+    desc: "Notification settings", 
+    icon: <Settings size={20} />, 
+    path: '/profile/preferences' 
+  }
 ];
 
 const Profile = () => {
@@ -19,7 +44,6 @@ const Profile = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // 监听认证状态变化
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (event, session) => {
         setUser(session?.user || null);
@@ -27,7 +51,6 @@ const Profile = () => {
       }
     );
     
-    // 立即获取当前会话状态
     const getSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user || null);
@@ -37,7 +60,6 @@ const Profile = () => {
     getSession();
 
     return () => {
-      // 在组件卸载时取消监听，防止内存泄漏
       if (authListener && authListener.subscription) {
         authListener.subscription.unsubscribe();
       }
@@ -56,7 +78,6 @@ const Profile = () => {
     }
   };
 
-  // 如果正在加载状态，可以显示一个简单的加载提示
   if (loading) {
     return (
       <div className="pt-32 min-h-screen bg-[#f8f6f4] flex items-center justify-center">
@@ -65,11 +86,8 @@ const Profile = () => {
     );
   }
 
-  // --- 登录/登出状态展示 ---
-  
   // A. 登录后状态展示
   const LoggedInCard = () => {
-    // 获取用户元数据（firstName 和 email 是最常用的）
     const userMetadata = user.user_metadata || {};
     const firstName = userMetadata.first_name || 'AURORA Member';
     const email = user.email || 'Member email hidden';
@@ -85,7 +103,6 @@ const Profile = () => {
           {email}
         </p>
         
-        {/* 登出按钮 */}
         <Button 
           variant="outline" 
           className="w-full max-w-xs h-12 text-base bg-transparent border-[#e5d5d0] hover:bg-[#fcf9f8] hover:text-[#7c2b3d]"
@@ -98,7 +115,7 @@ const Profile = () => {
     );
   };
 
-  // B. 登出前状态展示 (沿用用户提供的 Call-to-Action)
+  // B. 登出前状态展示
   const LoggedOutCard = () => (
     <div className="bg-white rounded-[2.5rem] p-10 mb-10 flex flex-col items-center justify-center text-center shadow-[0_20px_40px_-10px_rgba(124,43,61,0.05)] border border-[#f0e8e4]">
       <div className="w-20 h-20 rounded-full bg-[#f8f6f4] flex items-center justify-center text-[#7c2b3d] mb-6">
@@ -125,43 +142,44 @@ const Profile = () => {
     </div>
   );
 
-
   return (
     <div className="pt-32 min-h-screen bg-[#f8f6f4] font-sans text-[#1d1d1f] animate-fade-in">
       <div className="max-w-[800px] mx-auto px-6">
         
-        {/* 根据用户状态渲染卡片 */}
         {user ? <LoggedInCard /> : <LoggedOutCard />}
 
-        {/* === 账户设置列表 (无论是否登录都显示，但功能需要登录后才能用) === */}
         <h3 className="text-xl font-serif font-medium text-[#1d1d1f] mb-6 px-2">Account Settings</h3>
         
         <div className="bg-white rounded-[2.5rem] overflow-hidden shadow-[0_15px_30px_-10px_rgba(0,0,0,0.02)] border border-[#f0e8e4] divide-y divide-[#f5efec]">
           {ACCOUNT_LINKS.map((item, i) => (
-              // 列表项：如果未登录，点击后跳转到登录页面
               <div 
                 key={i} 
                 className="p-6 hover:bg-[#fcf9f8] cursor-pointer flex items-center gap-5 group transition-colors duration-300"
-                onClick={() => { if (!user) navigate('/login') }}
+                // 核心跳转逻辑：
+                // 1. 如果未登录，统一跳去 Login
+                // 2. 如果已登录，跳去对应的 item.path
+                onClick={() => { 
+                  if (!user) {
+                    navigate('/login');
+                  } else if (item.path) {
+                    navigate(item.path);
+                  }
+                }}
               >
-                {/* 左侧图标容器 (未登录时图标颜色变淡) */}
                 <div className={`w-12 h-12 rounded-full bg-[#f8f6f4] flex items-center justify-center ${user ? 'text-[#9a8a85] group-hover:text-[#7c2b3d] group-hover:bg-[#7c2b3d]/10' : 'text-[#d0c0bc]'} transition-colors duration-300`}>
                   {item.icon}
                 </div>
                 
-                {/* 文字内容 */}
                 <div className="flex-1">
                   <div className="font-medium text-[#1d1d1f] font-serif text-lg group-hover:text-[#7c2b3d] transition-colors">{item.title}</div>
                   <div className="text-sm text-[#9a8a85] font-light">{item.desc}</div>
                 </div>
                 
-                {/* 右侧箭头 */}
                 <ChevronRight size={18} className="text-[#d0c0bc] group-hover:text-[#7c2b3d] transition-colors transform group-hover:translate-x-1 duration-300" />
               </div>
           ))}
         </div>
         
-        {/* 底部留白 */}
         <div className="h-20"></div>
       </div>
     </div>

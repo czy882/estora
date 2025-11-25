@@ -3,22 +3,22 @@ import { Link, useNavigate } from 'react-router-dom';
 import Button from '../../components/Button';
 import { supabase } from '../../supabaseClient';
 
-// --- 核心浮动标签输入组件 (Floating Label Input Component) ---
-// 该组件封装了输入框和浮动标签的逻辑
+// --- 核心浮动标签输入组件 (修复版) ---
 const FloatingLabelInput = ({ id, label, type, value, onChange, required = false, className = '' }) => {
-  // 基础输入框样式
-  const inputBaseClass = "peer w-full h-12 px-5 pt-3 rounded-xl border border-[#e5d5d0] text-base text-[#1d1d1f] bg-[#fcf9f8] focus:bg-white focus:border-[#7c2b3d] focus:ring-1 focus:ring-[#7c2b3d] focus:outline-none transition-all";
+  // 1. 基础输入框样式：
+  // 增加 placeholder-transparent 确保占位符不可见，仅用于触发 CSS 状态
+  const inputBaseClass = "peer w-full h-14 px-4 pt-5 pb-1 rounded-xl border border-[#e5d5d0] text-[17px] text-[#1d1d1f] bg-[#fcf9f8] focus:bg-white focus:border-[#7c2b3d] focus:ring-1 focus:ring-[#7c2b3d] focus:outline-none transition-all placeholder-transparent";
   
-  // 标签浮动样式:
-  const labelBaseClass = "absolute left-5 top-1/2 transform -translate-y-1/2 pointer-events-none transition-all duration-300 ease-out text-[#9a8a85] text-base font-light select-none";
+  // 2. 标签基础样式：
+  // 保持原有的定位，作为初始状态
+  const labelBaseClass = "absolute left-4 top-1/4 transform -translate-y-1/2 pointer-events-none transition-all duration-300 ease-out text-[#9a8a85] text-[17px] select-none origin-[0]";
   
-  // 核心浮动效果：
-  // 1. peer-placeholder-shown:translate-y-0, peer-placeholder-shown:scale-100: 没输入时保持原位
-  // 2. peer-focus:-translate-y-[1.2rem], peer-focus:scale-75: 聚焦时上移并缩小
-  // 3. peer-not-placeholder-shown:... : 输入内容后也保持上移和缩小状态
-  const labelFloatClass = "peer-placeholder-shown:translate-y-0 peer-placeholder-shown:scale-100 peer-focus:-translate-y-[1.2rem] peer-focus:scale-75 peer-focus:text-[#7c2b3d] peer-not-placeholder-shown:-translate-y-[1.2rem] peer-not-placeholder-shown:scale-75 peer-not-placeholder-shown:text-[#7c2b3d] text-xs uppercase tracking-widest";
+  // 3. 浮动效果逻辑 (修复 Bug)：
+  // - peer-placeholder-shown: 没输入时，保持在中间 (scale-100, translate-y-0)
+  // - peer-focus: 聚焦时，上浮 (-translate-y-3) 并缩小 (scale-75)
+  // - peer-[:not(:placeholder-shown)]: 有内容时(非空)，保持上浮和缩小状态 (这是修复的关键)
+  const labelFloatClass = "peer-placeholder-shown:scale-100 peer-placeholder-shown:translate-y-0 peer-focus:scale-75 peer-focus:-translate-y-3 peer-focus:text-[#7c2b3d] peer-[:not(:placeholder-shown)]:scale-75 peer-[:not(:placeholder-shown)]:-translate-y-3 peer-[:not(:placeholder-shown)]:text-[#7c2b3d]";
 
-  // 注意：placeholder 必须是 " " (空格) 才能确保 :placeholder-shown 状态在初始加载时生效
   return (
     <div className={`relative ${className}`}>
       <input
@@ -26,8 +26,8 @@ const FloatingLabelInput = ({ id, label, type, value, onChange, required = false
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`${inputBaseClass} pt-3`} // 增加 padding-top 避免文字被遮挡
-        placeholder=" " 
+        className={inputBaseClass}
+        placeholder=" " // 必须留一个空格占位符，且不能删掉
         required={required}
       />
       <label
@@ -39,12 +39,11 @@ const FloatingLabelInput = ({ id, label, type, value, onChange, required = false
     </div>
   );
 };
-// --- 核心浮动标签输入组件结束 ---
 
 const Signup = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState(''); 
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState(''); 
   const [loading, setLoading] = useState(false);
@@ -94,11 +93,7 @@ const Signup = () => {
   
   return (
     <div className="min-h-screen bg-[#f8f6f4] pt-32 pb-20 px-4 animate-fade-in flex items-center justify-center font-sans">
-      
-      {/* 卡片式容器 */}
       <div className="w-full max-w-[500px] bg-white rounded-[2.5rem] p-8 md:p-12 shadow-[0_20px_40px_-10px_rgba(124,43,61,0.05)] border border-[#f0e8e4]">
-        
-        {/* Header */}
         <div className="text-center mb-10">
           <h1 className="text-3xl font-serif font-medium text-[#1d1d1f] mb-3">Create Account</h1>
           <p className="text-[#9a8a85] text-sm font-light">
@@ -106,10 +101,7 @@ const Signup = () => {
           </p>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSignup} className="space-y-5">
-          
-          {/* 1. Name Fields (使用 Floating Label) */}
           <div className="grid grid-cols-2 gap-4">
             <FloatingLabelInput 
               id="firstName"
@@ -129,7 +121,6 @@ const Signup = () => {
             />
           </div>
 
-          {/* 2. Email Address (Fixed Input) */}
           <FloatingLabelInput 
             id="email"
             label="Email Address"
@@ -139,17 +130,15 @@ const Signup = () => {
             required
           />
 
-          {/* 3. Password */}
           <FloatingLabelInput 
             id="password"
-            label="Password (At least 8 characters)"
+            label="Password"
             type="password" 
             value={password} 
             onChange={setPassword} 
             required
           />
           
-          {/* 4. Confirm Password */}
           <FloatingLabelInput 
             id="confirmPassword"
             label="Confirm Password"
@@ -159,7 +148,6 @@ const Signup = () => {
             required
           />
 
-          {/* 5. Marketing Checkbox */}
           <div className="pt-2">
             <label className="flex items-start gap-3 cursor-pointer group">
               <div className="relative flex items-center mt-0.5">
@@ -174,18 +162,16 @@ const Signup = () => {
             </label>
           </div>
           
-          {/* Error Message */}
           {error && (
             <div className="text-sm text-center text-[#7c2b3d] bg-[#fdf2f4] p-3 rounded-xl border border-[#f0d5da]">
               {error}
             </div>
           )}
 
-          {/* Submit Button */}
           <div className="pt-2">
             <Button 
               type="submit" 
-              className="w-full h-12 text-base shadow-lg shadow-[#7c2b3d]/20" 
+              className="w-full h-14 text-[17px] shadow-lg shadow-[#7c2b3d]/20"
               size="lg"
               disabled={loading}
             >
@@ -194,7 +180,6 @@ const Signup = () => {
           </div>
         </form>
 
-        {/* Footer Link */}
         <div className="mt-8 text-center text-sm text-[#9a8a85]">
            Already have an account?{' '}
            <Link to="/login" className="text-[#7c2b3d] font-medium hover:text-[#5a1e2b] hover:underline transition-colors">

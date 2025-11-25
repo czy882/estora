@@ -3,16 +3,23 @@ import { Link, useNavigate } from 'react-router-dom';
 import Button from '../../components/Button';
 import { supabase } from '../../supabaseClient';
 
-// --- 核心浮动标签输入组件 (与 Signup 保持一致) ---
+// --- 核心浮动标签输入组件 (与 Signup 保持一致的最新版本) ---
 const FloatingLabelInput = ({ id, label, type, value, onChange, required = false, className = '' }) => {
-  // 1. 基础输入框样式
+  // 1. 基础输入框样式：
+  // - 恢复 h-14 (56px) 高度
+  // - 恢复 text-[17px] 字体大小
+  // - 增加 pt-5 pb-1 为文字留出下方空间，同时上方留出空隙给浮动标签
   const inputBaseClass = "peer w-full h-14 px-4 pt-5 pb-1 rounded-xl border border-[#e5d5d0] text-[17px] text-[#1d1d1f] bg-[#fcf9f8] focus:bg-white focus:border-[#7c2b3d] focus:ring-1 focus:ring-[#7c2b3d] focus:outline-none transition-all";
   
-  // 2. 标签基础样式
-  const labelBaseClass = "absolute left-4 top-1/2 transform -translate-y-1/2 pointer-events-none transition-all duration-300 ease-out text-[#9a8a85] text-[17px] select-none origin-[0]";
+  // 2. 标签基础样式：
+  // - 初始状态：垂直居中，字体大小 17px (与输入文字一致)，颜色 #9a8a85 (灰色)
+  const labelBaseClass = "absolute left-4 top-1/4 transform -translate-y-1/2 pointer-events-none transition-all duration-300 ease-out text-[#9a8a85] text-[17px] select-none origin-[0]";
   
-  // 3. 浮动效果逻辑
-  const labelFloatClass = "peer-placeholder-shown:translate-y+1 peer-placeholder-shown:scale-100 peer-focus:-translate-y-6 peer-focus:scale-75 peer-focus:text-[#7c2b3d] peer-not-placeholder-shown:-translate-y-3 peer-not-placeholder-shown:scale-75 peer-not-placeholder-shown:text-[#7c2b3d]";
+  // 3. 浮动效果逻辑：
+  // - 没输入时 (placeholder-shown): 保持原位 (translate-y-0)
+  // - 聚焦或有内容时: 向上移动 (-translate-y-3), 缩小 (scale-75), 颜色变品牌色
+  // - 保持字体原样，只是缩小
+  const labelFloatClass = "peer-placeholder-shown:translate-y-0 peer-placeholder-shown:scale-100 peer-focus:-translate-y-3 peer-focus:scale-75 peer-focus:text-[#7c2b3d] peer-not-placeholder-shown:-translate-y-3 peer-not-placeholder-shown:scale-75 peer-not-placeholder-shown:text-[#7c2b3d]";
 
   return (
     <div className={`relative ${className}`}>
@@ -48,15 +55,12 @@ const Login = () => {
     setError(null);
 
     try {
-      // 调用 Supabase 登录接口
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) throw error;
-
-      // 登录成功跳转
       navigate('/profile');
     } catch (error) {
       setError(error.message || 'Failed to login');
@@ -126,8 +130,6 @@ const Login = () => {
             {loading ? 'Logging in...' : 'Log In'}
           </Button>
         </form>
-
-        {/* Divider removed to match cleaner style without social logins */}
 
         {/* Footer Link */}
         <div className="mt-8 text-center text-sm text-[#9a8a85]">

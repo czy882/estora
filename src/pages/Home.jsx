@@ -43,7 +43,7 @@ const Home = () => {
               </p>
               
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                <Button variant="primary" size="lg" className="h-14 px-8 text-lg shadow-xl shadow-[#7c2b3d]/20" onClick={() => navigate('/products')}>
+                <Button variant="primary" size="lg" className="h-14 px-8 text-lg shadow-xl shadow-[#7c2b3d]/20" onClick={() => navigate('/collections')}>
                   Shop the Collection
                 </Button>
                 <Button variant="ghost" className="text-[#7c2b3d] hover:text-[#5a1e2b] h-14 text-lg">
