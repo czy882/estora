@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { User, ChevronRight, Package, Heart, MapPin, CreditCard, Settings, LogOut } from 'lucide-react';
 import Button from '../components/Button';
 import { supabase } from '../supabaseClient';
+import LoadingScreen from '../components/LoadingScreen'; // 引入 LoadingScreen 组件
 
 // --- 更新：为每个选项配置路由路径 ---
 const ACCOUNT_LINKS = [
@@ -78,12 +79,9 @@ const Profile = () => {
     }
   };
 
+  // --- 核心修改：使用 LoadingScreen 组件 ---
   if (loading) {
-    return (
-      <div className="pt-32 min-h-screen bg-[#f8f6f4] flex items-center justify-center">
-        <div className="text-xl text-[#7c2b3d] font-serif">Loading profile...</div>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   // A. 登录后状态展示
@@ -155,9 +153,6 @@ const Profile = () => {
               <div 
                 key={i} 
                 className="p-6 hover:bg-[#fcf9f8] cursor-pointer flex items-center gap-5 group transition-colors duration-300"
-                // 核心跳转逻辑：
-                // 1. 如果未登录，统一跳去 Login
-                // 2. 如果已登录，跳去对应的 item.path
                 onClick={() => { 
                   if (!user) {
                     navigate('/login');

@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'; // 引入 Navigate 用于重定向
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import Home from './pages/Home';
 import Collections from './pages/products/Collections';
 import Cart from './pages/Cart';
 import Profile from './pages/Profile';
 import Checkout from './pages/Checkout';
-import Philosophy from './pages/Philosophy';
+import WhySilk from './pages/WhySilk';
 
 // 引入 Supabase Client
 import { supabase } from './supabaseClient';
@@ -21,18 +21,18 @@ import DailyLiners from './pages/products/DailyLiners';
 import Login from './pages/auth/Login';
 import Signup from './pages/auth/Signup';
 
-// 引入 Account 相关页面 (确保这些文件都在 src/pages/account/ 下)
+// 引入 Account 相关页面
 import MyOrders from './pages/account/MyOrders';
 import Wishlist from './pages/account/Wishlist';
 import Addresses from './pages/account/Addresses';
 import PaymentMethods from './pages/account/PaymentMethods';
 import Preferences from './pages/account/Preferences';
 
-// 返回最上面
+// 引入工具组件
 import ScrollToTop from './components/ScrollToTop';
+import LoadingScreen from './components/LoadingScreen';
 
 // --- 路由保护组件 ---
-// 如果没有 session (未登录)，则重定向到 /login
 const ProtectedRoute = ({ session, children }) => {
   if (!session) {
     return <Navigate to="/login" replace />;
@@ -91,13 +91,9 @@ function App() {
 
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
-  // 加载中状态
+  // 加载中状态：使用高端 LoadingScreen
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center font-serif text-xl text-[#7c2b3d]">
-        Loading Application...
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   return (
@@ -110,7 +106,7 @@ function App() {
           {/* --- 公开页面 --- */}
           <Route path="collections" element={<Collections onAddToCart={addToCart} />} />
           <Route path="products" element={<Collections onAddToCart={addToCart} />} /> {/* 兼容旧链接 */}
-          <Route path="philosophy" element={<Philosophy />} />
+          <Route path="why_silk" element={<WhySilk />} />
           
           <Route path="day_comfort" element={<DayComfort onAddToCart={addToCart} />} />
           <Route path="night_sanctuary" element={<NightSanctuary onAddToCart={addToCart} />} />
@@ -140,8 +136,6 @@ function App() {
           <Route path="signup" element={<Signup />} />
 
           {/* --- 受保护的 Account 路由 --- */}
-          {/* 只有登录后才能访问，否则跳到 Login */}
-          
           <Route 
             path="profile/orders" 
             element={
