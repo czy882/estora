@@ -1,23 +1,51 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CreditCard, Lock, ChevronLeft, MapPin, Check, Plus, ShieldCheck } from 'lucide-react';
+import { CreditCard, Lock, ChevronLeft, MapPin, ShieldCheck, Loader2 } from 'lucide-react'; // 引入 Loader2
 import Button from '../components/Button';
-import { supabase } from '../supabaseClient';
+// 1. 引入 Apollo Hooks 和 gql
+import { useMutation, useQuery, gql } from '@apollo/client';
 
-// --- 引入本地图片资源 ---
-// 假设图片位于 src/assets/images/ 目录下
-// 如果你的图片在 public 目录，请改为 const applePayImg = "/assets/images/apple_pay_logo.png" 等
+// 引入本地图片资源
 import applePayImg from '../assets/images/payment_logos/apple_pay_logo.png';
 import mastercardImg from '../assets/images/payment_logos/mastercard_logo.png';
 import visaImg from '../assets/images/payment_logos/visa_logo.png';
 
-// --- 1. 复用浮动标签输入框 (带右上角浮动动画) ---
-const CheckoutInput = ({ label, value, onChange, type = "text", className = "", required = false, icon }) => (
+// --- GraphQL: 获取当前登录用户信息 (用于自动填充) ---
+const GET_VIEWER = gql`
+  query GetViewer {
+    viewer {
+      id
+      email
+      firstName
+      lastName
+    }
+  }
+`;
+
+// --- GraphQL: 结账 Mutation (核心) ---
+const CHECKOUT_MUTATION = gql`
+  mutation Checkout($input: CheckoutInput!) {
+    checkout(input: $input) {
+      order {
+        databaseId
+        orderNumber
+        total
+        status
+      }
+      result
+      redirect
+    }
+  }
+`;
+
+// --- 复用浮动标签输入框 (保持不变) ---
+const CheckoutInput = ({ label, value, onChange, type = "text", className = "", required = false, icon, name }) => (
   <div className={`relative ${className}`}>
     <input
       type={type}
+      name={name}
       value={value}
-      onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+      onChange={onChange}
       className="peer w-full h-14 px-4 pt-6 pb-1 rounded-xl border border-[#e5d5d0] text-[17px] text-[#1d1d1f] bg-white focus:border-[#7c2b3d] focus:ring-1 focus:ring-[#7c2b3d] focus:outline-none transition-all placeholder-transparent"
       placeholder=" " 
       required={required}
@@ -32,58 +60,118 @@ const CheckoutInput = ({ label, value, onChange, type = "text", className = "", 
   </div>
 );
 
-// --- 2. 模拟的已保存数据 (仅对登录用户显示) ---
-const SAVED_ADDRESS = {
-  id: 1,
-  firstName: 'Aurora',
-  lastName: 'Member',
-  line1: '123 Silk Road',
-  line2: 'Level 8',
-  suburb: 'Melbourne',
-  state: 'VIC',
-  postcode: '3000',
-  phone: '0412 345 678'
-};
-
-const SAVED_CARDS = [
-  { id: 1, type: 'Visa', last4: '4242', isDefault: true },
-  { id: 2, type: 'Mastercard', last4: '8888', isDefault: false }
-];
-
 const Checkout = ({ cart }) => {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
   
-  // 支付状态
-  const [paymentMethod, setPaymentMethod] = useState('saved_card'); // 'saved_card', 'new_card', 'apple'
-  const [selectedCardId, setSelectedCardId] = useState(1); // 默认选中第一张卡
-  
-  // 地址状态 (登录用户可选)
-  const [useSavedAddress, setUseSavedAddress] = useState(true);
+  // --- 状态管理 ---
+  // 1. 表单数据 (Billing & Shipping)
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    address1: '',
+    city: '',
+    state: '',
+    postcode: '',
+    phone: '',
+    paymentMethod: 'bacs' // 默认为银行转账，这是最容易跑通的测试方式
+  });
+
+  // 2. 支付方式 UI 状态
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('new_card'); // 'new_card', 'apple'
+
+  // --- Apollo Query: 获取用户信息 ---
+  const { data: viewerData } = useQuery(GET_VIEWER, {
+    onCompleted: (data) => {
+      // 如果已登录，自动填充表单
+      if (data?.viewer) {
+        setFormData(prev => ({
+          ...prev,
+          firstName: data.viewer.firstName || '',
+          lastName: data.viewer.lastName || '',
+          email: data.viewer.email || ''
+        }));
+      }
+    }
+  });
+
+  // --- Apollo Mutation: 结账 ---
+  const [checkout, { loading: checkoutLoading, error: checkoutError }] = useMutation(CHECKOUT_MUTATION);
 
   // 计算总价
   const subtotal = cart.reduce((acc, item) => acc + item.price * item.quantity, 0);
   const shipping = 0; 
   const total = subtotal + shipping;
 
-  // 检查登录状态
-  useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setUser(session.user);
-        setPaymentMethod('saved_card'); // 登录用户默认使用已存卡片
-      } else {
-        setPaymentMethod('new_card'); // 游客默认使用新卡
-      }
-    };
-    checkUser();
-  }, []);
+  // --- 处理输入变化 ---
+  const handleInputChange = (e) => {
+    const { name, value } = e.target; // 注意：CheckoutInput 需要传递 name
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+  // 专门适配 CheckoutInput 的 onChange 封装
+  const createChangeHandler = (name) => (value) => {
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
 
-  const handlePayment = (e) => {
+  // --- 核心：处理支付提交 ---
+  const handlePayment = async (e) => {
     e.preventDefault();
-    alert('Order processing...');
-    navigate('/');
+
+    if (selectedPaymentMethod === 'apple') {
+        alert("Apple Pay is currently unavailable via API. Please use Credit Card (Simulation).");
+        return;
+    }
+
+    try {
+      // 准备发送给 WordPress 的数据
+      const input = {
+        paymentMethod: 'bacs', // ⚠️ 关键：这里强制使用 'bacs' (Direct Bank Transfer) 或 'cheque' 以绕过真实的信用卡验证，确保订单能生成。
+                               // 如果你装了 Stripe 插件并配置了 Token，这里可以是 'stripe'。
+        billing: {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          address1: formData.address1,
+          city: formData.city,
+          state: formData.state,
+          postcode: formData.postcode,
+          email: formData.email,
+          phone: formData.phone,
+        },
+        shipping: {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          address1: formData.address1,
+          city: formData.city,
+          state: formData.state,
+          postcode: formData.postcode,
+        },
+        // 将购物车转换成 lineItems
+        lineItems: cart.map(item => ({
+          productId: item.id || item.databaseId, // 确保这里有 ID
+          quantity: item.quantity
+        }))
+      };
+
+      console.log("Submitting Order...", input);
+
+      const { data } = await checkout({ variables: { input } });
+
+      if (data?.checkout?.order) {
+        // 成功！
+        console.log("Order Created:", data.checkout.order);
+        alert(`Order #${data.checkout.order.orderNumber} placed successfully!`);
+        // 这里应该清空购物车，然后跳转
+        // navigate('/order-confirmation', { state: { order: data.checkout.order } });
+        navigate('/profile/orders'); // 暂时跳转到订单列表
+      } else {
+         console.error("Checkout result:", data);
+         alert("Something went wrong with the checkout.");
+      }
+
+    } catch (err) {
+      console.error("Checkout Error:", err);
+      alert(`Checkout Failed: ${err.message}`);
+    }
   };
 
   if (cart.length === 0) {
@@ -115,26 +203,21 @@ const Checkout = ({ cart }) => {
                     <section>
                         <h2 className="text-lg font-serif mb-4 flex justify-between items-baseline">
                             Contact Information
-                            {!user && (
-                                <span className="text-sm font-sans text-[#9a8a85] font-normal hidden sm:inline">
-                                    Already have an account? <span onClick={() => navigate('/login')} className="text-[#7c2b3d] cursor-pointer hover:underline">Log in</span>
-                                </span>
-                            )}
                         </h2>
-                        {user ? (
-                             // 登录状态：显示只读邮箱
+                        {viewerData?.viewer ? (
                              <div className="bg-white p-4 rounded-xl border border-[#e5d5d0] text-[#5a5a5a] flex items-center justify-between">
-                                <span>{user.email}</span>
-                                <span className="text-xs bg-[#7c2b3d]/10 text-[#7c2b3d] px-2 py-1 rounded">Member</span>
+                                <span>{viewerData.viewer.email}</span>
+                                <span className="text-xs bg-[#7c2b3d]/10 text-[#7c2b3d] px-2 py-1 rounded">Logged In</span>
                              </div>
                         ) : (
-                             // 游客状态：输入邮箱
                             <div className="space-y-4">
-                                <CheckoutInput label="Email address" type="email" required />
-                                <div className="flex items-center gap-2">
-                                    <input type="checkbox" id="news" className="w-4 h-4 text-[#7c2b3d] focus:ring-[#7c2b3d] border-gray-300 rounded" />
-                                    <label htmlFor="news" className="text-sm text-[#5a5a5a]">Email me with news and offers</label>
-                                </div>
+                                <CheckoutInput 
+                                    label="Email address" 
+                                    type="email" 
+                                    required 
+                                    value={formData.email}
+                                    onChange={createChangeHandler('email')}
+                                />
                             </div>
                         )}
                     </section>
@@ -142,57 +225,31 @@ const Checkout = ({ cart }) => {
                     {/* === 2. Shipping Address === */}
                     <section>
                         <h2 className="text-lg font-serif mb-4">Shipping Address</h2>
-                        
-                        {/* 登录用户：已保存地址展示 */}
-                        {user && useSavedAddress ? (
-                            <div className="bg-white rounded-2xl border border-[#7c2b3d] p-6 relative ring-1 ring-[#7c2b3d]/20 transition-all">
-                                <div className="flex items-start gap-4">
-                                    <MapPin className="text-[#7c2b3d] mt-1" size={20} />
-                                    <div>
-                                        <p className="font-medium text-[#1d1d1f]">{SAVED_ADDRESS.firstName} {SAVED_ADDRESS.lastName}</p>
-                                        <p className="text-[#5a5a5a] text-sm mt-1">{SAVED_ADDRESS.line1}, {SAVED_ADDRESS.line2}</p>
-                                        <p className="text-[#5a5a5a] text-sm">{SAVED_ADDRESS.suburb}, {SAVED_ADDRESS.state} {SAVED_ADDRESS.postcode}</p>
-                                        <p className="text-[#5a5a5a] text-sm mt-1">{SAVED_ADDRESS.phone}</p>
-                                    </div>
-                                </div>
-                                <button 
-                                    type="button"
-                                    onClick={() => setUseSavedAddress(false)} 
-                                    className="mt-4 ml-9 text-sm text-[#7c2b3d] hover:underline"
-                                >
-                                    Use a different address
-                                </button>
-                                <div className="absolute top-4 right-4 text-xs font-bold text-[#7c2b3d] bg-[#7c2b3d]/10 px-2 py-1 rounded">DEFAULT</div>
+                        <div className="space-y-4 animate-fade-in">
+                            <div className="grid grid-cols-2 gap-4">
+                                <CheckoutInput label="First name" required value={formData.firstName} onChange={createChangeHandler('firstName')} />
+                                <CheckoutInput label="Last name" required value={formData.lastName} onChange={createChangeHandler('lastName')} />
                             </div>
-                        ) : (
-                            // 游客/新地址表单
-                            <div className="space-y-4 animate-fade-in">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <CheckoutInput label="First name" required />
-                                    <CheckoutInput label="Last name" required />
+                            <CheckoutInput label="Address" required value={formData.address1} onChange={createChangeHandler('address1')} />
+                            
+                            <div className="grid grid-cols-3 gap-4">
+                                <CheckoutInput label="City / Suburb" required value={formData.city} onChange={createChangeHandler('city')} />
+                                <div className="relative">
+                                    <select 
+                                        className="peer w-full h-14 px-4 pt-6 pb-1 rounded-xl border border-[#e5d5d0] text-[17px] text-[#1d1d1f] bg-white focus:border-[#7c2b3d] focus:ring-1 focus:ring-[#7c2b3d] outline-none appearance-none" 
+                                        required
+                                        value={formData.state}
+                                        onChange={(e) => createChangeHandler('state')(e.target.value)}
+                                    >
+                                        <option value="" disabled hidden></option>
+                                        {['VIC', 'NSW', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'].map(s => <option key={s} value={s}>{s}</option>)}
+                                    </select>
+                                    <label className="absolute left-4 top-4 transform scale-75 origin-[0] text-[#7c2b3d] pointer-events-none">State</label>
                                 </div>
-                                <CheckoutInput label="Address" required />
-                                <CheckoutInput label="Apartment, suite, etc. (optional)" />
-                                <div className="grid grid-cols-3 gap-4">
-                                    <CheckoutInput label="City / Suburb" required />
-                                    <div className="relative">
-                                        <select className="peer w-full h-14 px-4 pt-6 pb-1 rounded-xl border border-[#e5d5d0] text-[17px] text-[#1d1d1f] bg-white focus:border-[#7c2b3d] focus:ring-1 focus:ring-[#7c2b3d] outline-none appearance-none" required>
-                                            <option value="" disabled hidden></option>
-                                            {['VIC', 'NSW', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'].map(s => <option key={s} value={s}>{s}</option>)}
-                                        </select>
-                                        <label className="absolute left-4 top-4 transform scale-75 origin-[0] text-[#7c2b3d] pointer-events-none">State</label>
-                                    </div>
-                                    <CheckoutInput label="Postcode" required />
-                                </div>
-                                <CheckoutInput label="Phone" required />
-                                
-                                {user && (
-                                    <button type="button" onClick={() => setUseSavedAddress(true)} className="text-sm text-[#9a8a85] hover:text-[#1d1d1f] underline">
-                                        Cancel and use saved address
-                                    </button>
-                                )}
+                                <CheckoutInput label="Postcode" required value={formData.postcode} onChange={createChangeHandler('postcode')} />
                             </div>
-                        )}
+                            <CheckoutInput label="Phone" required value={formData.phone} onChange={createChangeHandler('phone')} />
+                        </div>
                     </section>
 
                     {/* === 3. Payment Method === */}
@@ -205,46 +262,29 @@ const Checkout = ({ cart }) => {
                         
                         <div className="border border-[#e5d5d0] rounded-2xl overflow-hidden bg-white">
                             
-                            {/* Option A: Saved Cards (Logged in only) */}
-                            {user && SAVED_CARDS.map(card => (
-                                <div 
-                                    key={card.id}
-                                    className={`p-4 flex items-center gap-3 cursor-pointer border-b border-[#e5d5d0] transition-colors ${paymentMethod === 'saved_card' && selectedCardId === card.id ? 'bg-[#fcf9f8]' : ''}`}
-                                    onClick={() => { setPaymentMethod('saved_card'); setSelectedCardId(card.id); }}
-                                >
-                                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${paymentMethod === 'saved_card' && selectedCardId === card.id ? 'border-[#7c2b3d]' : 'border-gray-300'}`}>
-                                        {paymentMethod === 'saved_card' && selectedCardId === card.id && <div className="w-2.5 h-2.5 rounded-full bg-[#7c2b3d]"></div>}
-                                    </div>
-                                    <div className="flex-1 flex items-center gap-3">
-                                        <span className="font-medium text-[#1d1d1f]">•••• {card.last4}</span>
-                                        {/* 使用图片替换 Logo */}
-                                        {card.type === 'Visa' ? 
-                                          <img src={visaImg} alt="Visa" className="h-9 w-auto object-contain" /> : 
-                                          <img src={mastercardImg} alt="Mastercard" className="h-9 w-auto object-contain" />
-                                        }
-                                    </div>
-                                </div>
-                            ))}
-
                             {/* Option B: New Credit Card */}
                             <div 
-                                className={`p-4 flex items-center gap-3 cursor-pointer border-b border-[#e5d5d0] transition-colors ${paymentMethod === 'new_card' ? 'bg-[#fcf9f8]' : ''}`}
-                                onClick={() => setPaymentMethod('new_card')}
+                                className={`p-4 flex items-center gap-3 cursor-pointer border-b border-[#e5d5d0] transition-colors ${selectedPaymentMethod === 'new_card' ? 'bg-[#fcf9f8]' : ''}`}
+                                onClick={() => setSelectedPaymentMethod('new_card')}
                             >
-                                <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${paymentMethod === 'new_card' ? 'border-[#7c2b3d]' : 'border-gray-300'}`}>
-                                    {paymentMethod === 'new_card' && <div className="w-2.5 h-2.5 rounded-full bg-[#7c2b3d]"></div>}
+                                <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${selectedPaymentMethod === 'new_card' ? 'border-[#7c2b3d]' : 'border-gray-300'}`}>
+                                    {selectedPaymentMethod === 'new_card' && <div className="w-2.5 h-2.5 rounded-full bg-[#7c2b3d]"></div>}
                                 </div>
                                 <span className="font-medium flex-1">Credit Card</span>
                                 <div className="flex gap-2">
-                                    {/* 1. 在 Credit Card 右上角展示 Visa 和 Mastercard 图片 */}
                                     <img src={visaImg} alt="Visa" className="h-9 w-auto object-contain" />
                                     <img src={mastercardImg} alt="Mastercard" className="h-9 w-auto object-contain" />
                                 </div>
                             </div>
                             
                             {/* New Card Form */}
-                            {paymentMethod === 'new_card' && (
+                            {selectedPaymentMethod === 'new_card' && (
                                 <div className="p-6 bg-[#fcf9f8] space-y-4 animate-fade-in border-b border-[#e5d5d0]">
+                                    {/* ⚠️ 注意：这里只是前端 UI 模拟。
+                                      因为我们使用的是 Headless 模式，为了能在不配置 Stripe Token 的情况下先跑通订单，
+                                      点击 "Pay" 实际上会发送 'bacs' (银行转账) 到 WordPress。
+                                      这样 WordPress 会生成订单，但不需要真实的信用卡扣款。
+                                    */}
                                     <CheckoutInput label="Card number" icon={<CreditCard size={18} />} />
                                     <div className="grid grid-cols-2 gap-4">
                                         <CheckoutInput label="Expiration (MM / YY)" />
@@ -256,22 +296,20 @@ const Checkout = ({ cart }) => {
 
                             {/* Option C: Apple Pay */}
                             <div 
-                                className={`p-4 flex items-center gap-3 cursor-pointer transition-colors ${paymentMethod === 'apple' ? 'bg-[#fcf9f8]' : ''}`}
-                                onClick={() => setPaymentMethod('apple')}
+                                className={`p-4 flex items-center gap-3 cursor-pointer transition-colors ${selectedPaymentMethod === 'apple' ? 'bg-[#fcf9f8]' : ''}`}
+                                onClick={() => setSelectedPaymentMethod('apple')}
                             >
-                                <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${paymentMethod === 'apple' ? 'border-[#7c2b3d]' : 'border-gray-300'}`}>
-                                    {paymentMethod === 'apple' && <div className="w-2.5 h-2.5 rounded-full bg-[#7c2b3d]"></div>}
+                                <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${selectedPaymentMethod === 'apple' ? 'border-[#7c2b3d]' : 'border-gray-300'}`}>
+                                    {selectedPaymentMethod === 'apple' && <div className="w-2.5 h-2.5 rounded-full bg-[#7c2b3d]"></div>}
                                 </div>
                                 <span className="font-medium flex-1">Apple Pay</span>
-                                {/* 3. 使用真正的 Apple Pay Logo 图片 */}
                                 <img src={applePayImg} alt="Apple Pay" className="h-9 w-auto object-contain" />
                             </div>
 
                             {/* Apple Pay Button */}
-                            {paymentMethod === 'apple' && (
+                            {selectedPaymentMethod === 'apple' && (
                                 <div className="p-6 bg-[#fcf9f8] animate-fade-in flex justify-center">
                                     <button type="button" className="w-full bg-black text-white h-12 rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition-opacity shadow-lg">
-                                        {/* 3. 黑色按钮上也使用 Apple Pay Logo 图片，添加 invert class 确保在黑底上显示 (如果是黑色logo) */}
                                         <span className="mr-1">Pay with</span>
                                         <img src={applePayImg} alt="Apple Pay" className="h-9 w-auto object-contain invert" />
                                     </button>
@@ -279,27 +317,42 @@ const Checkout = ({ cart }) => {
                             )}
                         </div>
                     </section>
+                    
+                    {/* Error Message */}
+                    {checkoutError && (
+                        <div className="p-4 bg-red-50 text-red-600 rounded-xl text-center text-sm">
+                            {checkoutError.message}
+                        </div>
+                    )}
 
                     {/* Pay Button */}
-                    {paymentMethod !== 'apple' && (
-                        <Button size="lg" className="w-full h-14 text-lg shadow-xl shadow-[#7c2b3d]/20" type="submit">
-                            {paymentMethod === 'saved_card' ? `Pay $${total.toFixed(2)}` : 'Confirm Order'}
+                    {selectedPaymentMethod !== 'apple' && (
+                        <Button 
+                            size="lg" 
+                            className="w-full h-14 text-lg shadow-xl shadow-[#7c2b3d]/20 flex items-center justify-center gap-2" 
+                            type="submit"
+                            disabled={checkoutLoading}
+                        >
+                            {checkoutLoading ? (
+                                <>Processing <Loader2 className="animate-spin" size={20} /></>
+                            ) : (
+                                `Pay $${total.toFixed(2)}`
+                            )}
                         </Button>
                     )}
                 </form>
             </div>
 
-            {/* Right Column: Order Summary (Sticky) */}
+            {/* Right Column: Order Summary (保持你的原有代码) */}
             <div className="lg:w-[380px] h-fit lg:sticky lg:top-32">
                 <div className="bg-white rounded-4xl p-8 border border-[#f0e8e4] shadow-sm">
                     <h3 className="text-xl font-serif mb-6">Order Summary</h3>
                     
                     <div className="space-y-3 mb-6 max-h-[300px] overflow-y-auto pr-2 scrollbar-hide">
                         {cart.map(item => (
-                            <div key={item.id} className="flex gap-4 items-center">
+                            <div key={item.id || item.databaseId} className="flex gap-4 items-center">
                                 <div className="w-16 h-16 bg-[#f8f6f4] rounded-xl flex items-center justify-center shrink-0 relative">
-                                    <img src={item.image} alt={item.name} className="w-12 h-12 object-contain mix-blend-multiply" />
-                                    {/* 2. 修复角标显示不全，调整位置 */}
+                                    <img src={item.image || item.image?.sourceUrl} alt={item.name} className="w-12 h-12 object-contain mix-blend-multiply" />
                                     <span className="absolute -top-2 -right-2 w-5 h-5 bg-[#7c2b3d] text-white text-xs rounded-full flex items-center justify-center font-medium shadow-sm z-10">
                                         {item.quantity}
                                     </span>

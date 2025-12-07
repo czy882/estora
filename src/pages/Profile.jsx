@@ -2,10 +2,24 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, ChevronRight, Package, Heart, MapPin, CreditCard, Settings, LogOut } from 'lucide-react';
 import Button from '../components/Button';
-import { supabase } from '../supabaseClient';
-import LoadingScreen from '../components/LoadingScreen'; // 引入 LoadingScreen 组件
+import LoadingScreen from '../components/LoadingScreen';
+// 1. 移除 Supabase，引入 Apollo Hooks
+import { useQuery, gql, useApolloClient } from '@apollo/client';
 
-// --- 更新：为每个选项配置路由路径 ---
+// 2. 定义获取当前用户信息的 Query
+const GET_VIEWER = gql`
+  query GetViewer {
+    viewer {
+      id
+      databaseId
+      email
+      firstName
+      lastName
+      username
+    }
+  }
+`;
+
 const ACCOUNT_LINKS = [
   { 
     title: "My Orders", 
@@ -40,55 +54,51 @@ const ACCOUNT_LINKS = [
 ];
 
 const Profile = () => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const apolloClient = useApolloClient(); // 获取 Apollo 客户端实例以操作缓存
 
-  useEffect(() => {
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setUser(session?.user || null);
-        setLoading(false);
-      }
-    );
-    
-    const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user || null);
-      setLoading(false);
-    };
-
-    getSession();
-
-    return () => {
-      if (authListener && authListener.subscription) {
-        authListener.subscription.unsubscribe();
-      }
-    };
-  }, []);
-
-  const handleLogout = async () => {
-    setLoading(true);
-    const { error } = await supabase.auth.signOut();
-    setLoading(false);
-    if (!error) {
-      alert('You have been signed out.');
-      navigate('/');
-    } else {
-      alert(`Logout error: ${error.message}`);
+  // 3. 使用 Apollo Query 获取用户信息
+  // 这里的 loading 和 data 会自动根据请求状态变化
+  // 如果本地没有 authToken，这个请求通常会返回 user: null 或者报错，需要处理
+  const { loading, data, refetch } = useQuery(GET_VIEWER, {
+    // 每次进入页面都检查一次，避免缓存导致状态不一致
+    fetchPolicy: 'network-only', 
+    onError: () => {
+      // 如果 Token 过期或无效，清除本地存储
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('user');
     }
+  });
+
+  const user = data?.viewer; // 从 GraphQL 数据中提取 viewer
+
+  // 4. 处理登出逻辑
+  const handleLogout = async () => {
+    // a. 清除本地存储的 Token
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('user');
+    
+    // b. 清除 Apollo 缓存 (重置所有状态)
+    await apolloClient.clearStore();
+    
+    // c. 刷新页面或跳转
+    alert('You have been signed out.');
+    navigate('/');
+    
+    // d. 强制刷新页面以确保所有状态重置 (可选)
+    // window.location.reload(); 
   };
 
-  // --- 核心修改：使用 LoadingScreen 组件 ---
   if (loading) {
     return <LoadingScreen />;
   }
 
   // A. 登录后状态展示
   const LoggedInCard = () => {
-    const userMetadata = user.user_metadata || {};
-    const firstName = userMetadata.first_name || 'AURORA Member';
-    const email = user.email || 'Member email hidden';
+    // 优先显示 firstName，没有则显示 username 或 "Member"
+    const displayName = user.firstName 
+      ? `${user.firstName} ${user.lastName || ''}` 
+      : (user.username || 'AURORA Member');
 
     return (
       <div className="bg-white rounded-[2.5rem] p-10 mb-10 flex flex-col items-center justify-center text-center shadow-[0_20px_40px_-10px_rgba(124,43,61,0.05)] border border-[#f0e8e4]">
@@ -96,16 +106,15 @@ const Profile = () => {
            <User size={40} strokeWidth={1.5} />
         </div>
         
-        <h1 className="text-3xl font-serif font-medium text-[#1d1d1f] mb-2">Welcome, {firstName}</h1>
+        <h1 className="text-3xl font-serif font-medium text-[#1d1d1f] mb-2">Welcome, {displayName}</h1>
         <p className="text-gray-500 mb-6 font-light leading-relaxed">
-          {email}
+          {user.email}
         </p>
         
         <Button 
           variant="outline" 
           className="w-full max-w-xs h-12 text-base bg-transparent border-[#e5d5d0] hover:bg-[#fcf9f8] hover:text-[#7c2b3d]"
           onClick={handleLogout}
-          disabled={loading}
         >
           <LogOut size={16} className="mr-2" /> Sign Out
         </Button>
@@ -113,7 +122,7 @@ const Profile = () => {
     );
   };
 
-  // B. 登出前状态展示
+  // B. 登出前状态展示 (保持不变)
   const LoggedOutCard = () => (
     <div className="bg-white rounded-[2.5rem] p-10 mb-10 flex flex-col items-center justify-center text-center shadow-[0_20px_40px_-10px_rgba(124,43,61,0.05)] border border-[#f0e8e4]">
       <div className="w-20 h-20 rounded-full bg-[#f8f6f4] flex items-center justify-center text-[#7c2b3d] mb-6">
@@ -144,6 +153,7 @@ const Profile = () => {
     <div className="pt-32 min-h-screen bg-[#f8f6f4] font-sans text-[#1d1d1f] animate-fade-in">
       <div className="max-w-[800px] mx-auto px-6">
         
+        {/* 根据 user 是否存在来决定显示哪张卡片 */}
         {user ? <LoggedInCard /> : <LoggedOutCard />}
 
         <h3 className="text-xl font-serif font-medium text-[#1d1d1f] mb-6 px-2">Account Settings</h3>

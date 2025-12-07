@@ -1,22 +1,37 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Button from '../../components/Button';
-import { supabase } from '../../supabaseClient';
+// 1. 移除 Supabase，引入 Apollo Hooks
+import { useMutation, gql } from '@apollo/client';
 
-// --- 核心浮动标签输入组件 (修复版) ---
+// 2. 定义 WordPress 注册 Mutation (针对 WooCommerce 客户)
+const REGISTER_MUTATION = gql`
+  mutation RegisterCustomer(
+    $email: String!, 
+    $password: String!, 
+    $firstName: String, 
+    $lastName: String
+  ) {
+    registerCustomer(input: {
+      email: $email, 
+      username: $email, # 使用邮箱作为用户名
+      password: $password, 
+      firstName: $firstName, 
+      lastName: $lastName
+    }) {
+      customer {
+        id
+        email
+        databaseId
+      }
+    }
+  }
+`;
+
+// --- 核心浮动标签输入组件 (你提供的修复版) ---
 const FloatingLabelInput = ({ id, label, type, value, onChange, required = false, className = '' }) => {
-  // 1. 基础输入框样式：
-  // 增加 placeholder-transparent 确保占位符不可见，仅用于触发 CSS 状态
   const inputBaseClass = "peer w-full h-14 px-4 pt-5 pb-1 rounded-xl border border-[#e5d5d0] text-[17px] text-[#1d1d1f] bg-[#fcf9f8] focus:bg-white focus:border-[#7c2b3d] focus:ring-1 focus:ring-[#7c2b3d] focus:outline-none transition-all placeholder-transparent";
-  
-  // 2. 标签基础样式：
-  // 保持原有的定位，作为初始状态
   const labelBaseClass = "absolute left-4 top-1/4 transform -translate-y-1/2 pointer-events-none transition-all duration-300 ease-out text-[#9a8a85] text-[17px] select-none origin-[0]";
-  
-  // 3. 浮动效果逻辑 (修复 Bug)：
-  // - peer-placeholder-shown: 没输入时，保持在中间 (scale-100, translate-y-0)
-  // - peer-focus: 聚焦时，上浮 (-translate-y-3) 并缩小 (scale-75)
-  // - peer-[:not(:placeholder-shown)]: 有内容时(非空)，保持上浮和缩小状态 (这是修复的关键)
   const labelFloatClass = "peer-placeholder-shown:scale-100 peer-placeholder-shown:translate-y-0 peer-focus:scale-75 peer-focus:-translate-y-3 peer-focus:text-[#7c2b3d] peer-[:not(:placeholder-shown)]:scale-75 peer-[:not(:placeholder-shown)]:-translate-y-3 peer-[:not(:placeholder-shown)]:text-[#7c2b3d]";
 
   return (
@@ -27,7 +42,7 @@ const FloatingLabelInput = ({ id, label, type, value, onChange, required = false
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={inputBaseClass}
-        placeholder=" " // 必须留一个空格占位符，且不能删掉
+        placeholder=" " 
         required={required}
       />
       <label
@@ -46,48 +61,48 @@ const Signup = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState(''); 
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+
+  // 3. 使用 Apollo Mutation Hook
+  // loading 状态由 Apollo 自动管理
+  const [registerMutation, { loading }] = useMutation(REGISTER_MUTATION);
 
   const handleSignup = async (e) => {
     e.preventDefault();
     setError(null);
-    setLoading(true);
 
+    // 密码一致性检查
     if (password !== confirmPassword) {
       setError("Passwords do not match. Please try again.");
-      setLoading(false);
       return;
     }
 
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: email,
-        password: password,
-        options: {
-          data: {
-            first_name: firstName,
-            last_name: lastName,
-            full_name: `${firstName} ${lastName}`
-          }
+      // 4. 执行 WordPress 注册
+      const { data } = await registerMutation({
+        variables: {
+          email,
+          password,
+          firstName,
+          lastName
         }
       });
 
-      if (error) {
-        setError(error.message);
-      } else if (data.user) {
-        alert(`Welcome ${firstName}! Account created successfully.`);
-        navigate('/'); 
+      // 5. 处理注册成功
+      if (data?.registerCustomer?.customer) {
+        // 注册成功，提示用户并跳转到登录页
+        // (注意：WP 默认不会直接返回登录 Token，除非配置了自动登录，所以最稳妥是让用户去登录一次)
+        alert(`Welcome ${firstName}! Account created successfully. Please log in.`);
+        navigate('/login'); 
       } else {
-        setError('Registration successful. Please check your email for verification.');
+        throw new Error('Registration failed. Please try again.');
       }
 
     } catch (err) {
-      setError('An unexpected error occurred.');
       console.error(err);
-    } finally {
-      setLoading(false);
+      // 如果是 GraphQL 错误（例如邮箱已存在），显示错误信息
+      setError(err.message || 'An unexpected error occurred during registration.');
     }
   };
   

@@ -8,9 +8,6 @@ import Profile from './pages/Profile';
 import Checkout from './pages/Checkout';
 import WhySilk from './pages/WhySilk';
 
-// 引入 Supabase Client
-import { supabase } from './supabaseClient';
-
 // 引入产品页面
 import DayComfort from './pages/products/DayComfort';
 import NightSanctuary from './pages/products/NightSanctuary';
@@ -32,40 +29,29 @@ import Preferences from './pages/account/Preferences';
 import ScrollToTop from './components/ScrollToTop';
 import LoadingScreen from './components/LoadingScreen';
 
-// --- 路由保护组件 ---
-const ProtectedRoute = ({ session, children }) => {
-  if (!session) {
-    return <Navigate to="/login" replace />;
-  }
+// --- 临时路由保护组件 (WP Auth 待开发) ---
+// 目前我们暂时允许通行，直到我们接入 WordPress 的 JWT 登录
+const ProtectedRoute = ({ children }) => {
+  // TODO: 这里以后会接入 WordPress 的 Auth Context
+  const isAuthenticated = false; // 暂时设为 false 或 true 方便调试
+  
+  // 暂时注释掉拦截逻辑，防止无法访问页面
+  // if (!isAuthenticated) {
+  //   return <Navigate to="/login" replace />;
+  // }
   return children;
 };
 
 function App() {
+  // --- 购物车状态管理 ---
+  // 注意：在完整对接 WordPress 后，这里建议改用 Context 或 Apollo Cache 管理
   const [cart, setCart] = useState([]);
   
-  // --- Auth 状态管理 ---
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
-  
-  useEffect(() => {
-    // 1. 检查初始会话
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
+  // --- Auth 状态管理 (Supabase 已移除) ---
+  // const [session, setSession] = useState(null); // 已移除
+  const [loading, setLoading] = useState(false); // 暂时设为 false
 
-    // 2. 监听状态变化
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-  // --------------------
-
-  // 购物车逻辑
+  // 购物车逻辑 (本地 State 模拟，后续可换成 mutation)
   const addToCart = (product) => {
     setCart(prev => {
       const exists = prev.find(i => i.id === product.id);
@@ -91,7 +77,6 @@ function App() {
 
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
-  // 加载中状态：使用高端 LoadingScreen
   if (loading) {
     return <LoadingScreen />;
   }
@@ -100,14 +85,15 @@ function App() {
     <BrowserRouter>
       <ScrollToTop />
       <Routes>
-        <Route path="/" element={<MainLayout cartCount={cartCount} session={session} />}>
+        <Route path="/" element={<MainLayout cartCount={cartCount} session={null} />}>
           <Route index element={<Home />} />
           
           {/* --- 公开页面 --- */}
           <Route path="collections" element={<Collections onAddToCart={addToCart} />} />
-          <Route path="products" element={<Collections onAddToCart={addToCart} />} /> {/* 兼容旧链接 */}
+          <Route path="products" element={<Collections onAddToCart={addToCart} />} />
           <Route path="why_silk" element={<WhySilk />} />
           
+          {/* 单个产品页面 - 记得也要把这些页面里的 Supabase 逻辑删掉，换成 Apollo */}
           <Route path="day_comfort" element={<DayComfort onAddToCart={addToCart} />} />
           <Route path="night_sanctuary" element={<NightSanctuary onAddToCart={addToCart} />} />
           <Route path="overnight_protection" element={<OvernightProtection onAddToCart={addToCart} />} />
@@ -135,51 +121,12 @@ function App() {
           <Route path="login" element={<Login />} />
           <Route path="signup" element={<Signup />} />
 
-          {/* --- 受保护的 Account 路由 --- */}
-          <Route 
-            path="profile/orders" 
-            element={
-              <ProtectedRoute session={session}>
-                <MyOrders />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="profile/wishlist" 
-            element={
-              <ProtectedRoute session={session}>
-                <Wishlist onAddToCart={addToCart} />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="profile/addresses" 
-            element={
-              <ProtectedRoute session={session}>
-                <Addresses />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="profile/payments" 
-            element={
-              <ProtectedRoute session={session}>
-                <PaymentMethods />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="profile/preferences" 
-            element={
-              <ProtectedRoute session={session}>
-                <Preferences />
-              </ProtectedRoute>
-            } 
-          />
+          {/* --- Account 路由 (暂时解除保护以便调试 UI) --- */}
+          <Route path="profile/orders" element={<MyOrders />} />
+          <Route path="profile/wishlist" element={<Wishlist onAddToCart={addToCart} />} />
+          <Route path="profile/addresses" element={<Addresses />} />
+          <Route path="profile/payments" element={<PaymentMethods />} />
+          <Route path="profile/preferences" element={<Preferences />} />
 
         </Route>
       </Routes>

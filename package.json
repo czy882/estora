@@ -10,7 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.84.0",
+    "@apollo/client": "^3.13.1",
+    "graphql": "^16.10.0",
     "@tailwindcss/vite": "^4.1.17",
     "lucide-react": "^0.554.0",
     "react": "^19.2.0",

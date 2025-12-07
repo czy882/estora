@@ -1,24 +1,28 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Button from '../../components/Button';
-import { supabase } from '../../supabaseClient';
+// 1. 移除 Supabase，引入 Apollo Hooks
+import { useMutation, gql } from '@apollo/client';
 
-// --- 核心浮动标签输入组件 (与 Signup 保持一致的最新版本) ---
+// 2. 定义 WordPress 登录 Mutation
+// 这会向 WordPress 请求 JWT Token 和用户信息
+const LOGIN_MUTATION = gql`
+  mutation Login($username: String!, $password: String!) {
+    login(input: {clientMutationId: "login_request", username: $username, password: $password}) {
+      authToken
+      user {
+        id
+        name
+        email
+      }
+    }
+  }
+`;
+
+// --- 核心浮动标签输入组件 (保持不变) ---
 const FloatingLabelInput = ({ id, label, type, value, onChange, required = false, className = '' }) => {
-  // 1. 基础输入框样式：
-  // - 恢复 h-14 (56px) 高度
-  // - 恢复 text-[17px] 字体大小
-  // - 增加 pt-5 pb-1 为文字留出下方空间，同时上方留出空隙给浮动标签
   const inputBaseClass = "peer w-full h-14 px-4 pt-5 pb-1 rounded-xl border border-[#e5d5d0] text-[17px] text-[#1d1d1f] bg-[#fcf9f8] focus:bg-white focus:border-[#7c2b3d] focus:ring-1 focus:ring-[#7c2b3d] focus:outline-none transition-all";
-  
-  // 2. 标签基础样式：
-  // - 初始状态：垂直居中，字体大小 17px (与输入文字一致)，颜色 #9a8a85 (灰色)
   const labelBaseClass = "absolute left-4 top-1/4 transform -translate-y-1/2 pointer-events-none transition-all duration-300 ease-out text-[#9a8a85] text-[17px] select-none origin-[0]";
-  
-  // 3. 浮动效果逻辑：
-  // - 没输入时 (placeholder-shown): 保持原位 (translate-y-0)
-  // - 聚焦或有内容时: 向上移动 (-translate-y-3), 缩小 (scale-75), 颜色变品牌色
-  // - 保持字体原样，只是缩小
   const labelFloatClass = "peer-placeholder-shown:translate-y-0 peer-placeholder-shown:scale-100 peer-focus:-translate-y-3 peer-focus:scale-75 peer-focus:text-[#7c2b3d] peer-not-placeholder-shown:-translate-y-3 peer-not-placeholder-shown:scale-75 peer-not-placeholder-shown:text-[#7c2b3d]";
 
   return (
@@ -29,7 +33,7 @@ const FloatingLabelInput = ({ id, label, type, value, onChange, required = false
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={inputBaseClass}
-        placeholder=" " // 必须留一个空格占位符，用于触发 CSS 状态
+        placeholder=" " 
         required={required}
       />
       <label
@@ -46,26 +50,47 @@ const Login = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // 3. 使用 Apollo Mutation Hook
+  // loading 状态现在由 Apollo 自动管理
+  const [loginMutation, { loading }] = useMutation(LOGIN_MUTATION);
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
     setError(null);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      // 4. 执行 WordPress 登录
+      // WordPress 的 login mutation 在 'username' 字段中同时也接受邮箱
+      const { data } = await loginMutation({
+        variables: {
+          username: email, 
+          password: password,
+        },
       });
 
-      if (error) throw error;
-      navigate('/profile');
-    } catch (error) {
-      setError(error.message || 'Failed to login');
-    } finally {
-      setLoading(false);
+      // 5. 处理登录成功
+      if (data?.login?.authToken) {
+        // 保存 Token 到本地 (这是之后获取个人订单等数据的“钥匙”)
+        localStorage.setItem('authToken', data.login.authToken);
+        
+        // 也可以顺便存一下用户信息
+        if (data.login.user) {
+            localStorage.setItem('user', JSON.stringify(data.login.user));
+        }
+        
+        // 跳转到个人中心
+        navigate('/profile');
+      } else {
+        throw new Error('Login failed: Invalid credentials');
+      }
+
+    } catch (err) {
+      // 错误处理
+      console.error(err);
+      // 如果是 GraphQL 错误，通常在 err.message 里
+      setError(err.message || 'Failed to login. Please check your email and password.');
     }
   };
 
