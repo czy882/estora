@@ -2,11 +2,24 @@ import React from 'react';
 
 const LoadingScreen = () => {
   return (
-    <div className="fixed inset-0 bg-[#f8f6f4] z-50 flex flex-col items-center justify-center">
+    <div
+      className="fixed inset-0 bg-[#f8f6f4] z-50 flex flex-col items-center justify-center"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading"
+    >
       
       {/* 品牌展示区域 */}
       <div className="relative flex flex-col items-center justify-center min-h-[200px]">
         
+        {/* 背景光晕：低调的丝绸酒红渐变 */}
+        <div
+          className="absolute inset-0 -z-10 flex items-center justify-center"
+          aria-hidden="true"
+        >
+          <div className="w-[260px] h-[260px] md:w-[340px] md:h-[340px] rounded-full bg-[#7c2b3d]/10 blur-[60px] opacity-70"></div>
+        </div>
+
         {/* 1. Logo: 采用高斯模糊渐入效果 (Blur Reveal) */}
         <h1 
           className="text-5xl md:text-7xl font-serif text-[#7c2b3d] tracking-tight opacity-0"
@@ -14,7 +27,7 @@ const LoadingScreen = () => {
             animation: 'logoReveal 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards' 
           }}
         >
-          AURORA
+          ESTORA
         </h1>
 
         {/* 2. 丝线动画: 模拟蚕丝的流动 (Silk Flow) */}
@@ -34,7 +47,7 @@ const LoadingScreen = () => {
             animation: 'fadeIn 1s ease-out 0.8s forwards' 
           }}
         >
-          Loading Experience
+          Loading
         </p>
       </div>
 
@@ -59,15 +72,15 @@ const LoadingScreen = () => {
             opacity: 0;
           }
           30% {
-            width: 60px; /* 展开 */
+            width: 72px; /* 展开 */
             opacity: 0.6;
           }
           50% {
-            width: 80px; /* 最长 */
+            width: 96px; /* 最长 */
             opacity: 1;
           }
           70% {
-            width: 60px; /* 收缩 */
+            width: 72px; /* 收缩 */
             opacity: 0.6;
           }
           100% {

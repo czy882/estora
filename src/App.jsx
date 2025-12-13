@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import MainLayout from "./layouts/MainLayout";
 import Home from "./pages/Home";
@@ -13,6 +13,8 @@ import DayComfort from "./pages/products/DayComfort";
 import NightSanctuary from "./pages/products/NightSanctuary";
 import OvernightProtection from "./pages/products/OvernightProtection";
 import DailyLiners from "./pages/products/DailyLiners";
+// 动态产品详情页（Woo Store API 联动）
+import ProductDetail from "./pages/products/ProductDetail";
 
 // Auth
 import Login from "./pages/auth/Login";
@@ -59,6 +61,8 @@ function App() {
           <Route path="products" element={<Collections />} />
           <Route path="why_silk" element={<WhySilk />} />
 
+          {/* --- 动态产品详情页（/product/:id）--- */}
+          <Route path="product/:id" element={<ProductDetail />} />
           {/* --- 单个产品页（内部用 useCart().addItem） --- */}
           <Route path="day_comfort" element={<DayComfort />} />
           <Route path="night_sanctuary" element={<NightSanctuary />} />

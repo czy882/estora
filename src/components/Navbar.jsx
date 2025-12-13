@@ -1,11 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ShoppingBag, User, Menu, X, Search } from 'lucide-react';
+import { useCart } from '../store/cartStore';
 
-const Navbar = ({ cartCount }) => {
+const Navbar = () => {
+  // 中文注释：控制滚动后的 Navbar 样式状态
   const [isScrolled, setIsScrolled] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // 中文注释：用“打开菜单时的路径”来表示移动端菜单是否打开，避免在 useEffect 里 setState
+  const [mobileMenuPath, setMobileMenuPath] = useState(null);
   const location = useLocation();
+
+  // 中文注释：当路径变化时，isMobileMenuOpen 会自然变为 false（无需 useEffect setState）
+  const isMobileMenuOpen = mobileMenuPath === location.pathname;
+
+  // 中文注释：从 CoCart 全局购物车中计算数量（真实 Woo 购物车）
+  const { cart } = useCart();
+  const cartCount = cart?.items?.reduce((acc, item) => acc + (item.quantity || 0), 0) || 0;
 
   // 产品链接配置 (修正为标准连字符路径，匹配 App.jsx)
   const productLinks = [
@@ -86,18 +96,21 @@ const Navbar = ({ cartCount }) => {
               )}
             </Link>
             
-            <button className="lg:hidden text-[#2c2c2c]" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-               <Menu size={24} strokeWidth={1.5} />
+            <button
+              className="lg:hidden text-[#2c2c2c]"
+              onClick={() => setMobileMenuPath((prev) => (prev ? null : location.pathname))}
+            >
+              <Menu size={24} strokeWidth={1.5} />
             </button>
           </div>
         </div>
       </nav>
 
       {/* === Mobile Menu Overlay === */}
-      <div className={`fixed inset-0 z-40 bg-[#fbf9f8] transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${mobileMenuOpen ? 'opacity-100 visible translate-y-0' : 'opacity-0 invisible -translate-y-10'}`}>
+      <div className={`fixed inset-0 z-40 bg-[#fbf9f8] transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isMobileMenuOpen ? 'opacity-100 visible translate-y-0' : 'opacity-0 invisible -translate-y-10'}`}>
         <div className="h-full flex flex-col p-8 pt-32 relative">
            <button 
-             onClick={() => setMobileMenuOpen(false)} 
+             onClick={() => setMobileMenuPath(null)} 
              className="absolute top-8 right-8 w-10 h-10 flex items-center justify-center rounded-full bg-white shadow-sm text-[#2c2c2c]"
            >
               <X size={20} />
@@ -107,7 +120,7 @@ const Navbar = ({ cartCount }) => {
               <div className="space-y-1">
                  <p className="text-xs font-bold tracking-widest uppercase text-[#9a8a85] mb-4">Products</p>
                  {productLinks.map(item => (
-                   <MobileNavLink key={item.label} to={item.path} label={item.label} onClick={() => setMobileMenuOpen(false)} />
+                   <MobileNavLink key={item.label} to={item.path} label={item.label} onClick={() => setMobileMenuPath(null)} />
                  ))}
               </div>
               
@@ -116,13 +129,13 @@ const Navbar = ({ cartCount }) => {
               <div className="space-y-1">
                  <p className="text-xs font-bold tracking-widest uppercase text-[#9a8a85] mb-4">Discover</p>
                  {otherLinks.map(item => (
-                   <MobileNavLink key={item.label} to={item.path} label={item.label} onClick={() => setMobileMenuOpen(false)} />
+                   <MobileNavLink key={item.label} to={item.path} label={item.label} onClick={() => setMobileMenuPath(null)} />
                  ))}
               </div>
            </div>
 
            <div className="mt-auto">
-              <Link to="/login" onClick={() => setMobileMenuOpen(false)} className="text-lg font-serif text-[#7c2b3d]">Log in / Sign up</Link>
+              <Link to="/login" onClick={() => setMobileMenuPath(null)} className="text-lg font-serif text-[#7c2b3d]">Log in / Sign up</Link>
            </div>
         </div>
       </div>

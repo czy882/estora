@@ -1,32 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Button from '../../components/Button';
-// 1. 移除 Supabase，引入 Apollo Hooks
-import { useMutation, gql } from '@apollo/client';
-
-// 2. 定义 WordPress 注册 Mutation (针对 WooCommerce 客户)
-const REGISTER_MUTATION = gql`
-  mutation RegisterCustomer(
-    $email: String!, 
-    $password: String!, 
-    $firstName: String, 
-    $lastName: String
-  ) {
-    registerCustomer(input: {
-      email: $email, 
-      username: $email, # 使用邮箱作为用户名
-      password: $password, 
-      firstName: $firstName, 
-      lastName: $lastName
-    }) {
-      customer {
-        id
-        email
-        databaseId
-      }
-    }
-  }
-`;
+import { http } from '../../lib/http';
 
 // --- 核心浮动标签输入组件 (你提供的修复版) ---
 const FloatingLabelInput = ({ id, label, type, value, onChange, required = false, className = '' }) => {
@@ -62,47 +37,54 @@ const Signup = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState(''); 
   const [error, setError] = useState(null);
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-
-  // 3. 使用 Apollo Mutation Hook
-  // loading 状态由 Apollo 自动管理
-  const [registerMutation, { loading }] = useMutation(REGISTER_MUTATION);
 
   const handleSignup = async (e) => {
     e.preventDefault();
     setError(null);
 
-    // 密码一致性检查
+    // 中文注释：密码一致性检查
     if (password !== confirmPassword) {
-      setError("Passwords do not match. Please try again.");
+      setError('Passwords do not match. Please try again.');
       return;
     }
 
+    setLoading(true);
+
     try {
-      // 4. 执行 WordPress 注册
-      const { data } = await registerMutation({
-        variables: {
+      // 中文注释：Headless 架构下，Woo/WP 默认不提供“匿名注册客户”的安全 REST 端点。
+      // 我们使用站点自定义端点（后端需要添加一个极小的注册接口）。
+      // 端点建议：/wp-json/estora/v1/register
+      const data = await http('/wp-json/estora/v1/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           email,
           password,
-          firstName,
-          lastName
-        }
+          first_name: firstName,
+          last_name: lastName,
+          marketing_opt_in: marketingOptIn,
+        }),
       });
 
-      // 5. 处理注册成功
-      if (data?.registerCustomer?.customer) {
-        // 注册成功，提示用户并跳转到登录页
-        // (注意：WP 默认不会直接返回登录 Token，除非配置了自动登录，所以最稳妥是让用户去登录一次)
-        alert(`Welcome ${firstName}! Account created successfully. Please log in.`);
-        navigate('/login'); 
-      } else {
-        throw new Error('Registration failed. Please try again.');
+      // 中文注释：后端返回 ok=true 或返回 customer/user id 都视为成功
+      const ok = data?.ok === true || !!data?.id || !!data?.customer_id || !!data?.user_id;
+      if (!ok) {
+        throw new Error(data?.message || 'Registration failed. Please try again.');
       }
 
+      alert(`Welcome ${firstName}! Account created successfully. Please log in.`);
+      navigate('/login');
     } catch (err) {
       console.error(err);
-      // 如果是 GraphQL 错误（例如邮箱已存在），显示错误信息
-      setError(err.message || 'An unexpected error occurred during registration.');
+      const msg = err?.data?.message || err?.message || 'An unexpected error occurred during registration.';
+      setError(msg);
+    } finally {
+      setLoading(false);
     }
   };
   
@@ -166,7 +148,12 @@ const Signup = () => {
           <div className="pt-2">
             <label className="flex items-start gap-3 cursor-pointer group">
               <div className="relative flex items-center mt-0.5">
-                <input type="checkbox" className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-[#e5d5d0] bg-[#fcf9f8] checked:border-[#7c2b3d] checked:bg-[#7c2b3d] transition-all" />
+                <input
+                  type="checkbox"
+                  checked={marketingOptIn}
+                  onChange={(e) => setMarketingOptIn(e.target.checked)}
+                  className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-[#e5d5d0] bg-[#fcf9f8] checked:border-[#7c2b3d] checked:bg-[#7c2b3d] transition-all"
+                />
                 <svg className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" viewBox="0 0 14 14" fill="none">
                   <path d="M11.6666 3.5L5.24992 9.91667L2.33325 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>

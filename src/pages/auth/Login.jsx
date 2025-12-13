@@ -1,23 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Button from '../../components/Button';
-// 1. 移除 Supabase，引入 Apollo Hooks
-import { useMutation, gql } from '@apollo/client';
-
-// 2. 定义 WordPress 登录 Mutation
-// 这会向 WordPress 请求 JWT Token 和用户信息
-const LOGIN_MUTATION = gql`
-  mutation Login($username: String!, $password: String!) {
-    login(input: {clientMutationId: "login_request", username: $username, password: $password}) {
-      authToken
-      user {
-        id
-        name
-        email
-      }
-    }
-  }
-`;
+import { http } from '../../lib/http';
 
 // --- 核心浮动标签输入组件 (保持不变) ---
 const FloatingLabelInput = ({ id, label, type, value, onChange, required = false, className = '' }) => {
@@ -51,46 +35,59 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
-
-  // 3. 使用 Apollo Mutation Hook
-  // loading 状态现在由 Apollo 自动管理
-  const [loginMutation, { loading }] = useMutation(LOGIN_MUTATION);
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError(null);
+    setLoading(true);
 
     try {
-      // 4. 执行 WordPress 登录
-      // WordPress 的 login mutation 在 'username' 字段中同时也接受邮箱
-      const { data } = await loginMutation({
-        variables: {
-          username: email, 
-          password: password,
+      // 中文注释：向 WordPress JWT 插件请求 token
+      // 常见端点：/wp-json/jwt-auth/v1/token
+      const data = await http('/wp-json/jwt-auth/v1/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          username: email, // 中文注释：此字段在很多配置下可接受邮箱或用户名
+          password,
+        }),
       });
 
-      // 5. 处理登录成功
-      if (data?.login?.authToken) {
-        // 保存 Token 到本地 (这是之后获取个人订单等数据的“钥匙”)
-        localStorage.setItem('authToken', data.login.authToken);
-        
-        // 也可以顺便存一下用户信息
-        if (data.login.user) {
-            localStorage.setItem('user', JSON.stringify(data.login.user));
-        }
-        
-        // 跳转到个人中心
-        navigate('/profile');
-      } else {
-        throw new Error('Login failed: Invalid credentials');
+      // 中文注释：JWT 插件通常返回 token、user_email、user_display_name、user_nicename
+      const token = data?.token;
+      if (!token) {
+        throw new Error(data?.message || 'Login failed: Invalid credentials');
       }
 
+      // 中文注释：保存 Token（用于后续读取订单/地址等受保护资源）
+      localStorage.setItem('authToken', token);
+
+      // 中文注释：保存用户信息（供 Profile 页面展示）
+      const user = {
+        email: data?.user_email || email,
+        username: data?.user_nicename || data?.user_login || '',
+        firstName: '',
+        lastName: '',
+        displayName: data?.user_display_name || '',
+      };
+      localStorage.setItem('user', JSON.stringify(user));
+
+      // 中文注释：登录成功后跳转到个人中心
+      navigate('/profile');
     } catch (err) {
-      // 错误处理
       console.error(err);
-      // 如果是 GraphQL 错误，通常在 err.message 里
-      setError(err.message || 'Failed to login. Please check your email and password.');
+      // 中文注释：统一错误提示
+      const msg = err?.data?.message || err?.message || 'Failed to login. Please check your email and password.';
+      setError(msg);
+
+      // 中文注释：登录失败时清理可能残留的无效 token
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('user');
+    } finally {
+      setLoading(false);
     }
   };
 

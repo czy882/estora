@@ -99,7 +99,8 @@ export function CartProvider({ children }) {
     [cart, loading, error]
   );
 
-  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
+  // 中文注释：这里不能用 JSX（因为当前文件是 .js），改用 React.createElement 避免 Vite 解析错误
+  return React.createElement(CartContext.Provider, { value }, children);
 }
 
 export function useCart() {
