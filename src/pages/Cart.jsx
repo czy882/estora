@@ -1,9 +1,10 @@
-//src/pages/Cart.jsx
+// src/pages/Cart.jsx
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Minus, Plus, Trash2, ArrowRight, ShoppingBag } from "lucide-react";
+import { Minus, Plus, Trash2, ArrowRight, ShoppingBag, Loader2 } from "lucide-react";
 import Button from "../components/Button";
+import { useCart } from "../store/cartStore";
 
 // ================================
 // ✅ 工具函数：价格解包 + 格式化
@@ -13,16 +14,13 @@ import Button from "../components/Button";
 function getPriceNumber(priceLike) {
   if (priceLike == null) return 0;
 
-  // 1) 直接是数字/字符串
   if (typeof priceLike === "number") return priceLike;
 
   if (typeof priceLike === "string") {
-    // 可能是 "$45.00" / "45.00" / "AUD 45.00" 等
     const n = Number(priceLike.replace(/[^\d.]/g, ""));
     return Number.isNaN(n) ? 0 : n;
   }
 
-  // 2) 可能是对象：{ value, min_purchase, max_purchase }
   if (typeof priceLike === "object") {
     const v = priceLike.value ?? priceLike.min_purchase ?? priceLike.max_purchase;
     const n = Number(v);
@@ -32,7 +30,14 @@ function getPriceNumber(priceLike) {
   return 0;
 }
 
-// 中文注释：货币格式化（澳币）
+// 中文注释：把“分(cents)”自动转换为“元(dollars)”
+function normalizeMoney(n) {
+  const num = Number(n) || 0;
+  // 经验规则：>= 1000 的整数通常是 cents（例如 2999 -> 29.99）
+  if (Number.isInteger(num) && num >= 1000) return num / 100;
+  return num;
+}
+
 function formatAUD(n) {
   return new Intl.NumberFormat("en-AU", {
     style: "currency",
@@ -40,45 +45,28 @@ function formatAUD(n) {
   }).format(Number(n) || 0);
 }
 
-// 中文注释：把 cart 统一成 “可渲染 item 数组”
-// 兼容：
-// - cart 本身就是数组
-// - cart.items 是数组
-// - cart.items 是对象（key -> item）
-// - cart.line_items / cart.cart_contents 等（不同实现）
 function normalizeCartItems(cart) {
   if (!cart) return [];
-
   if (Array.isArray(cart)) return cart;
 
   const maybeItems =
     cart.items ?? cart.line_items ?? cart.cart_items ?? cart.cart_contents ?? cart.contents;
 
   if (!maybeItems) return [];
-
   if (Array.isArray(maybeItems)) return maybeItems;
-
-  if (typeof maybeItems === "object") {
-    // 例如：{ "abc123": { ... }, "def456": { ... } }
-    return Object.values(maybeItems);
-  }
-
+  if (typeof maybeItems === "object") return Object.values(maybeItems);
   return [];
 }
 
-// 中文注释：尽量统一取到 item 的“唯一 key”
-// CoCart 通常用 item_key 或 key；本地 mock 可能用 id
 function getItemKey(item) {
   return item?.item_key ?? item?.key ?? item?.cart_item_key ?? item?.id;
 }
 
-// 中文注释：尽量统一取到展示字段
 function getItemName(item) {
   return item?.name ?? item?.product_name ?? item?.title ?? "Item";
 }
 
 function getItemImage(item) {
-  // 兼容：image string / images array / featured_image
   if (typeof item?.image === "string") return item.image;
   if (item?.images?.[0]?.src) return item.images[0].src;
   if (item?.images?.[0]?.source_url) return item.images[0].source_url;
@@ -86,28 +74,31 @@ function getItemImage(item) {
   return null;
 }
 
-// 中文注释：尽量统一 quantity
 function getItemQuantity(item) {
   const q = item?.quantity ?? item?.qty ?? item?.quantity?.value;
   const n = Number(q);
   return Number.isNaN(n) || n <= 0 ? 1 : n;
 }
 
-// 中文注释：尽量统一价格字段
+// 中文注释：尽量统一拿到“单价”（CoCart 常给 item.price / item.price_raw / item.prices?.price）
 function getItemUnitPrice(item) {
-  // 常见字段：price / prices?.price / totals?.line_subtotal / totals?.line_total / item.price.value
-  if (item?.price != null) return getPriceNumber(item.price);
+  if (item?.price_raw != null) return normalizeMoney(getPriceNumber(item.price_raw));
+  if (item?.price != null) return normalizeMoney(getPriceNumber(item.price));
+  if (item?.prices?.price != null) return normalizeMoney(getPriceNumber(item.prices.price));
 
-  if (item?.prices?.price != null) return getPriceNumber(item.prices.price);
+  // 中文注释：如果只有 totals（往往是行总价），就按 qty 反推单价
+  const qty = getItemQuantity(item);
+  const line =
+    item?.totals?.line_total ??
+    item?.totals?.line_subtotal ??
+    item?.line_total ??
+    item?.line_subtotal;
 
-  // 如果后端只给了 line_total/line_subtotal（那是总价），就退回 0
-  // 你也可以在这里按 qty 反推单价（但容易出税/折扣误差）
+  if (line != null && qty > 0) return normalizeMoney(getPriceNumber(line)) / qty;
+
   return 0;
 }
 
-// ================================
-// 动画辅助组件（保留你的风格）
-// ================================
 const FadeIn = ({ children, delay = 0, className = "" }) => (
   <div
     className={`animate-slide-up ${className}`}
@@ -117,29 +108,120 @@ const FadeIn = ({ children, delay = 0, className = "" }) => (
   </div>
 );
 
-/**
- * Cart 组件
- * - 仍沿用你之前的 props 结构：cart / onUpdateQuantity / onRemoveFromCart
- * - 但内部已更强容错：cart 可以是数组，也可以是对象结构（CoCart/Woo 结构）
- */
-const Cart = ({ cart, onUpdateQuantity, onRemoveFromCart }) => {
+const Cart = () => {
   const navigate = useNavigate();
+  const { cart, loading, error, refreshCart, updateItem, removeItem } = useCart();
 
-  const items = normalizeCartItems(cart);
+  // 中文注释：局部乐观 UI（避免“请求成功但页面不变”的观感）
+  const [optimisticQty, setOptimisticQty] = useState({});
+  const [optimisticHidden, setOptimisticHidden] = useState({});
 
-  // 中文注释：计算总价（单价 * qty）
-  const total = items.reduce((acc, item) => {
-    const qty = getItemQuantity(item);
-    const unit = getItemUnitPrice(item);
-    return acc + unit * qty;
-  }, 0);
+  const items = useMemo(() => normalizeCartItems(cart), [cart]);
 
-  const hasItems = items.length > 0;
+  // 中文注释：进入页面强制拉一次最新 cart
+  useEffect(() => {
+    refreshCart().catch(() => {});
+  }, [refreshCart]);
+
+  // 中文注释：当服务端 cart 更新后，只清理“已经同步成功”的乐观缓存，避免 UI 先变后又被清空导致闪烁/回滚
+  useEffect(() => {
+    // 1) 清理已同步的数量乐观值
+    setOptimisticQty((prev) => {
+      if (!prev || Object.keys(prev).length === 0) return prev;
+      const next = { ...prev };
+      for (const it of items) {
+        const k = getItemKey(it);
+        if (!k) continue;
+        const serverQty = getItemQuantity(it);
+        if (next[k] != null && Number(next[k]) === Number(serverQty)) {
+          delete next[k];
+        }
+      }
+      return next;
+    });
+
+    // 2) 清理已同步的“隐藏(删除)”乐观值：服务端已不存在该 item 时才清理
+    setOptimisticHidden((prev) => {
+      if (!prev || Object.keys(prev).length === 0) return prev;
+      const next = { ...prev };
+      const serverKeys = new Set(items.map((it) => String(getItemKey(it) ?? "")).filter(Boolean));
+      for (const k of Object.keys(next)) {
+        // 若服务端已没有该 key，则认为删除已确认，移除隐藏标记
+        if (!serverKeys.has(String(k))) {
+          delete next[k];
+        }
+      }
+      return next;
+    });
+  }, [items]);
+
+  const viewItems = useMemo(() => {
+    // 中文注释：把 “已删除” 的 item 先从 UI 隐藏
+    return items.filter((it) => {
+      const k = getItemKey(it);
+      return !k || !optimisticHidden[k];
+    });
+  }, [items, optimisticHidden]);
+
+  const total = useMemo(() => {
+    return viewItems.reduce((acc, item) => {
+      const key = getItemKey(item);
+      const qty = key && optimisticQty[key] != null ? optimisticQty[key] : getItemQuantity(item);
+      const unit = getItemUnitPrice(item);
+      return acc + unit * qty;
+    }, 0);
+  }, [viewItems, optimisticQty]);
+
+  const hasItems = viewItems.length > 0;
+
+  // ================================
+  // 事件：更新数量 / 删除
+  // ================================
+
+  const handleSetQty = async (item, nextQty) => {
+    const key = getItemKey(item);
+    if (!key) return;
+
+    const qty = Math.max(1, Math.floor(Number(nextQty) || 1));
+
+    // ✅ 乐观更新
+    setOptimisticQty((prev) => ({ ...prev, [key]: qty }));
+
+    try {
+      // 中文注释：让 store 自己用接口返回来更新 cart；这里不强制 refresh，避免马上被旧 cart 覆盖回滚
+      await updateItem(key, qty);
+    } catch (e) {
+      console.error("[Cart] update qty failed:", e);
+      // 回滚：刷新一次纠正
+      refreshCart().catch(() => {});
+    }
+  };
+
+  const handleRemove = async (item) => {
+    const key = getItemKey(item);
+    if (!key) return;
+
+    // ✅ 乐观隐藏
+    setOptimisticHidden((prev) => ({ ...prev, [key]: true }));
+
+    try {
+      // 中文注释：不强制 refresh，避免成功后立刻被旧 cart 覆盖回滚
+      await removeItem(key);
+    } catch (e) {
+      console.error("[Cart] remove failed:", e);
+      // 回滚：取消隐藏并刷新
+      setOptimisticHidden((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      refreshCart().catch(() => {});
+    }
+  };
 
   return (
     <div className="pt-32 pb-20 min-h-screen bg-[#f8f6f4] font-sans text-[#1d1d1f]">
       <div className="max-w-5xl mx-auto px-6">
-        {/* Header */}
         <FadeIn>
           <h1 className="text-4xl md:text-5xl font-serif font-medium text-center mb-6 tracking-tight text-[#1d1d1f]">
             Your Shopping Bag
@@ -154,8 +236,15 @@ const Cart = ({ cart, onUpdateQuantity, onRemoveFromCart }) => {
           </FadeIn>
         )}
 
+        {error && (
+          <div className="max-w-[900px] mx-auto mb-8">
+            <div className="bg-white rounded-[2.5rem] p-6 border border-[#f0e8e4] text-[#7c2b3d] text-sm text-center">
+              {error?.message || String(error)}
+            </div>
+          </div>
+        )}
+
         {!hasItems ? (
-          // === 空状态设计 (Empty State) ===
           <div className="flex flex-col items-center justify-center py-20 min-h-[50vh]">
             <FadeIn delay={200} className="relative mb-8">
               <div className="w-40 h-40 bg-white rounded-full flex items-center justify-center shadow-[0_20px_40px_-10px_rgba(124,43,61,0.05)] border border-[#f0e8e4]">
@@ -170,19 +259,24 @@ const Cart = ({ cart, onUpdateQuantity, onRemoveFromCart }) => {
               <p className="text-[#9a8a85] mb-10 font-light max-w-md mx-auto">
                 Looks like you haven&apos;t added anything yet. Explore our collection of premium silk care.
               </p>
-              <Button size="lg" className="shadow-xl shadow-[#7c2b3d]/10 px-10" onClick={() => navigate("/products")}>
+              <Button
+                size="lg"
+                className="shadow-xl shadow-[#7c2b3d]/10 px-10"
+                onClick={() => navigate("/products")}
+              >
                 Start Shopping
               </Button>
             </FadeIn>
           </div>
         ) : (
           <div className="max-w-[900px] mx-auto">
-            {/* Cart Items Container */}
             <FadeIn delay={200}>
               <div className="bg-white rounded-[2.5rem] p-8 md:p-10 shadow-[0_20px_40px_-10px_rgba(124,43,61,0.05)] border border-[#f0e8e4] mb-8">
-                {items.map((item, index) => {
+                {viewItems.map((item, index) => {
                   const key = getItemKey(item) ?? index;
-                  const qty = getItemQuantity(item);
+                  const serverQty = getItemQuantity(item);
+                  const qty = optimisticQty[key] != null ? optimisticQty[key] : serverQty;
+
                   const unit = getItemUnitPrice(item);
                   const lineTotal = unit * qty;
 
@@ -190,48 +284,32 @@ const Cart = ({ cart, onUpdateQuantity, onRemoveFromCart }) => {
                   const image = getItemImage(item);
 
                   return (
-                    <div
-                      key={key}
-                      className="flex flex-col md:flex-row gap-8 py-8 border-b border-[#f0e8e4] last:border-0"
-                    >
-                      {/* Image */}
+                    <div key={key} className="flex flex-col md:flex-row gap-8 py-8 border-b border-[#f0e8e4] last:border-0">
                       <div className="w-24 h-24 md:w-32 md:h-32 bg-[#f8f6f4] rounded-2xl flex items-center justify-center shrink-0 overflow-hidden">
                         {image ? (
-                          <img
-                            src={image}
-                            alt={name}
-                            className="w-3/4 h-3/4 object-contain mix-blend-multiply"
-                          />
+                          <img src={image} alt={name} className="w-3/4 h-3/4 object-contain mix-blend-multiply" />
                         ) : (
                           <div className="text-xs text-[#9a8a85]">No Image</div>
                         )}
                       </div>
 
-                      {/* Details */}
                       <div className="flex-1 flex flex-col justify-between">
                         <div className="flex justify-between items-start gap-6">
                           <div className="min-w-0">
                             <h3 className="text-xl font-serif font-medium text-[#1d1d1f] mb-1 truncate">{name}</h3>
-                            {/* 可选展示：如果你有 category/variant 字段 */}
                             <p className="text-sm text-[#9a8a85]">
-                              {item?.variation?.[0]?.value ||
-                                item?.variant ||
-                                item?.category ||
-                                "ESTORA Collection"}
+                              {item?.variation?.[0]?.value || item?.variant || item?.category || "ESTORA Collection"}
                             </p>
                           </div>
 
-                          {/* 关键修复：永远渲染 string，不渲染 object */}
-                          <p className="text-lg font-medium text-[#1d1d1f] whitespace-nowrap">
-                            {formatAUD(lineTotal)}
-                          </p>
+                          <p className="text-lg font-medium text-[#1d1d1f] whitespace-nowrap">{formatAUD(lineTotal)}</p>
                         </div>
 
                         <div className="flex items-center justify-between mt-6">
                           <div className="flex items-center gap-4 bg-[#f8f6f4] rounded-full px-4 py-2">
                             <button
-                              onClick={() => onUpdateQuantity(getItemKey(item) ?? item?.id, -1)}
-                              disabled={qty <= 1}
+                              onClick={() => handleSetQty(item, qty - 1)}
+                              disabled={loading || qty <= 1}
                               className="text-[#1d1d1f] hover:text-[#7c2b3d] disabled:opacity-30 transition-colors"
                             >
                               <Minus size={16} />
@@ -240,27 +318,26 @@ const Cart = ({ cart, onUpdateQuantity, onRemoveFromCart }) => {
                             <span className="font-medium text-sm w-4 text-center">{qty}</span>
 
                             <button
-                              onClick={() => onUpdateQuantity(getItemKey(item) ?? item?.id, 1)}
-                              className="text-[#1d1d1f] hover:text-[#7c2b3d] transition-colors"
+                              onClick={() => handleSetQty(item, qty + 1)}
+                              disabled={loading}
+                              className="text-[#1d1d1f] hover:text-[#7c2b3d] disabled:opacity-30 transition-colors"
                             >
                               <Plus size={16} />
                             </button>
                           </div>
 
                           <button
-                            onClick={() => onRemoveFromCart(getItemKey(item) ?? item?.id)}
-                            className="text-[#9a8a85] hover:text-[#c94e4e] text-sm flex items-center gap-2 group transition-colors"
+                            onClick={() => handleRemove(item)}
+                            disabled={loading}
+                            className="text-[#9a8a85] hover:text-[#c94e4e] text-sm flex items-center gap-2 group transition-colors disabled:opacity-40"
                           >
                             <span className="hidden sm:inline group-hover:underline">Remove</span>
                             <Trash2 size={18} />
                           </button>
                         </div>
 
-                        {/* 如果你想显示单价（可选） */}
                         {unit > 0 && (
-                          <div className="mt-4 text-xs text-[#9a8a85]">
-                            Unit price: {formatAUD(unit)}
-                          </div>
+                          <div className="mt-4 text-xs text-[#9a8a85]">Unit price: {formatAUD(unit)}</div>
                         )}
                       </div>
                     </div>
@@ -269,7 +346,6 @@ const Cart = ({ cart, onUpdateQuantity, onRemoveFromCart }) => {
               </div>
             </FadeIn>
 
-            {/* Summary Section */}
             <FadeIn delay={300}>
               <div className="bg-white rounded-[2.5rem] p-8 md:p-10 shadow-[0_20px_40px_-10px_rgba(124,43,61,0.05)] border border-[#f0e8e4]">
                 <div className="space-y-4 mb-8">
@@ -286,17 +362,24 @@ const Cart = ({ cart, onUpdateQuantity, onRemoveFromCart }) => {
                 <div className="border-t border-[#f0e8e4] pt-6 flex flex-col md:flex-row items-center justify-between gap-6">
                   <div className="flex flex-col items-center md:items-start">
                     <span className="text-sm text-[#9a8a85] mb-1">Total (GST incl.)</span>
-                    <div className="text-3xl font-serif font-medium text-[#1d1d1f]">
-                      {formatAUD(total)}
-                    </div>
+                    <div className="text-3xl font-serif font-medium text-[#1d1d1f]">{formatAUD(total)}</div>
                   </div>
 
                   <Button
                     size="lg"
                     className="w-full md:w-auto px-12 h-14 text-lg shadow-xl shadow-[#7c2b3d]/20"
                     onClick={() => navigate("/checkout")}
+                    disabled={loading}
                   >
-                    Checkout <ArrowRight size={18} className="ml-2" />
+                    {loading ? (
+                      <span className="inline-flex items-center gap-2">
+                        Updating <Loader2 className="animate-spin" size={18} />
+                      </span>
+                    ) : (
+                      <>
+                        Checkout <ArrowRight size={18} className="ml-2" />
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>

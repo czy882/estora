@@ -1,9 +1,4 @@
 // src/store/cartStore.js
-// 中文注释：购物车状态管理（CoCart）
-// 用法：
-// 1) 在 main.jsx 最外层包裹 <CartProvider>
-// 2) 组件中使用 const { cart, addItem, updateItem, clear, refreshCart, loading, error } = useCart()
-
 import React, {
   createContext,
   useCallback,
@@ -13,146 +8,203 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { getCart, addToCart, updateCartItem, clearCart } from "../services/cocartApi";
 
+import {
+  getCart,
+  addToCart,
+  updateCartItem,
+  removeCartItem,
+  clearCart,
+} from "../services/cocartApi";
+
+// 中文注释：Cart Context
 const CartContext = createContext(null);
 
-// 中文注释：CoCart 不同版本/端点的返回结构可能不同，这里做统一解包
-function unwrapCart(data) {
-  // 常见情况：直接返回 cart；或返回 { cart: ... }；或返回 { data: ... }
-  return data?.cart ?? data?.data ?? data;
-}
-
-// 中文注释：把各种错误结构统一转成可读字符串
-function toErrorMessage(e, fallback) {
-  return (
-    e?.data?.message ||
-    e?.response?.data?.message ||
-    e?.message ||
-    (typeof e === "string" ? e : "") ||
-    fallback
-  );
+// 中文注释：把 CoCart 返回的结构尽量原样保存（避免你 UI 解析字段出错）
+function normalizeCart(cart) {
+  return cart || null;
 }
 
 export function CartProvider({ children }) {
   const [cart, setCart] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false); // 中文注释：拉取购物车 loading
+  const [updating, setUpdating] = useState(false); // 中文注释：加减/删除等操作 loading
+  const [error, setError] = useState(null);
 
-  // 中文注释：防止并发请求导致的“旧响应覆盖新响应”
-  const reqIdRef = useRef(0);
+  // 中文注释：防止无限并发/循环请求
+  const inFlightRef = useRef(false);
 
-  const withRequestGuard = useCallback(async (fn) => {
-    const reqId = ++reqIdRef.current;
-    setLoading(true);
-    setError("");
+  // ================================
+  // 1) 拉取购物车（只允许串行）
+  // ================================
+  const refreshCart = useCallback(async () => {
+    if (inFlightRef.current) return; // 中文注释：正在请求就别重复打
+    inFlightRef.current = true;
 
     try {
-      const data = await fn();
-      const nextCart = unwrapCart(data);
-
-      // 中文注释：只接受最新一次请求的返回
-      if (reqId === reqIdRef.current) {
-        setCart(nextCart);
-      }
-
-      return nextCart;
+      setLoading(true);
+      setError(null);
+      const data = await getCart();
+      setCart(normalizeCart(data));
     } catch (e) {
-      const msg = toErrorMessage(e, "Cart request failed");
-      if (reqId === reqIdRef.current) {
-        setError(msg);
-      }
-      throw e;
+      setError(e?.message || "Failed to fetch cart");
     } finally {
-      if (reqId === reqIdRef.current) {
-        setLoading(false);
-      }
+      setLoading(false);
+      inFlightRef.current = false;
     }
   }, []);
 
-  // 中文注释：拉取购物车
-  const refreshCart = useCallback(() => {
-    return withRequestGuard(async () => await getCart());
-  }, [withRequestGuard]);
-
-  // 中文注释：加入购物车
-  // 兼容两种调用方式：
-  // 1) addItem(productId, qty)
-  // 2) addItem({ id: productId, quantity: qty })
-  const addItem = useCallback(
-    (arg1, arg2 = 1) => {
-      return withRequestGuard(async () => {
-        const productIdRaw =
-          typeof arg1 === "object" && arg1
-            ? arg1.id ?? arg1.product_id ?? arg1.productId
-            : arg1;
-
-        const quantityRaw =
-          typeof arg1 === "object" && arg1 ? arg1.quantity ?? arg1.qty ?? 1 : arg2;
-
-        const productId = Number(productIdRaw);
-        if (!productId || Number.isNaN(productId)) {
-          // 中文注释：让报错信息和后端一致，方便你在前端定位
-          const err = new Error("Missing parameter(s): id");
-          err.data = { message: "Missing parameter(s): id", productIdRaw };
-          throw err;
-        }
-
-        const qty = Math.max(1, Number(quantityRaw) || 1);
-
-        // 中文注释：这里把“数值型 id”传给 cocartApi.addToCart
-        return await addToCart(productId, qty);
-      });
-    },
-    [withRequestGuard]
-  );
-
-  // 中文注释：更新购物车 item 数量
-  const updateItem = useCallback(
-    (itemKey, quantity) => {
-      return withRequestGuard(async () => {
-        const qty = Number(quantity);
-        return await updateCartItem(itemKey, Number.isNaN(qty) ? 1 : qty);
-      });
-    },
-    [withRequestGuard]
-  );
-
-  // 中文注释：清空购物车
-  const clear = useCallback(() => {
-    return withRequestGuard(async () => await clearCart());
-  }, [withRequestGuard]);
-
-  // 中文注释：首次进入站点自动拉取一次购物车
-  // 为了避免严格 lint 误报（setState-in-effect），用 rAF 将调用放到提交阶段之后
+  // ✅ 关键修复：只在 Provider 首次挂载时拉一次
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      refreshCart().catch(() => {});
-    });
-    return () => cancelAnimationFrame(id);
+    refreshCart();
   }, [refreshCart]);
 
+  // ================================
+  // 2) 加入购物车
+  // ================================
+  const addItem = useCallback(async (productId, quantity = 1) => {
+    try {
+      setUpdating(true);
+      setError(null);
+      const data = await addToCart(productId, quantity);
+      // 中文注释：CoCart 正常会直接返回最新 cart
+      setCart(normalizeCart(data));
+      return data;
+    } catch (e) {
+      setError(e?.message || "Failed to add item");
+      throw e;
+    } finally {
+      setUpdating(false);
+    }
+  }, []);
+
+  // ================================
+  // 3) 更新数量
+  // ✅ 关键修复：Cart.jsx 通常传的是 delta（+1 / -1），但 CoCart 需要“绝对数量”
+  // 这里同时兼容：
+  // - 传入 delta：+1 / -1
+  // - 传入绝对数量：>= 1 的整数
+  // ================================
+  function getCartItemsArray(c) {
+    if (!c) return [];
+
+    // CoCart 常见：items 是对象（item_key -> item）或数组
+    const maybeItems =
+      c.items ?? c.line_items ?? c.cart_items ?? c.cart_contents ?? c.contents;
+
+    if (!maybeItems) return [];
+    if (Array.isArray(maybeItems)) return maybeItems;
+    if (typeof maybeItems === "object") return Object.values(maybeItems);
+    return [];
+  }
+
+  function getItemQtyFromCart(c, itemKey) {
+    const items = getCartItemsArray(c);
+    if (!items.length) return 1;
+
+    const found = items.find((it) => {
+      const key = it?.item_key ?? it?.key ?? it?.cart_item_key;
+      return String(key) === String(itemKey);
+    });
+
+    // CoCart 常见：quantity 是 number 或 { value }
+    const q = found?.quantity?.value ?? found?.quantity ?? found?.qty;
+    const n = Number(q);
+    return Number.isNaN(n) || n <= 0 ? 1 : n;
+  }
+
+  const updateItem = useCallback(
+    async (itemKey, change) => {
+      try {
+        setUpdating(true);
+        setError(null);
+
+        if (!itemKey) throw new Error("Missing item key");
+
+        // 中文注释：判断是 delta 还是 absolute
+        const raw = Number(change);
+        const isDelta = raw === 1 || raw === -1;
+
+        const currentQty = getItemQtyFromCart(cart, itemKey);
+
+        // 中文注释：如果传的是 delta，就用当前数量推导 nextQty；否则当作绝对数量
+        const nextQty = isDelta ? currentQty + raw : raw;
+
+        const qty = Math.max(1, Number(nextQty) || 1);
+
+        const data = await updateCartItem(itemKey, qty);
+        setCart(normalizeCart(data));
+        return data;
+      } catch (e) {
+        setError(e?.message || "Failed to update item");
+        throw e;
+      } finally {
+        setUpdating(false);
+      }
+    },
+    [cart]
+  );
+
+  // ================================
+  // 4) 删除 item
+  // ================================
+  const removeItem = useCallback(async (itemKey) => {
+    try {
+      setUpdating(true);
+      setError(null);
+
+      const data = await removeCartItem(itemKey);
+      setCart(normalizeCart(data));
+      return data;
+    } catch (e) {
+      setError(e?.message || "Failed to remove item");
+      throw e;
+    } finally {
+      setUpdating(false);
+    }
+  }, []);
+
+  // ================================
+  // 5) 清空购物车
+  // ================================
+  const clear = useCallback(async () => {
+    try {
+      setUpdating(true);
+      setError(null);
+
+      const data = await clearCart();
+      setCart(normalizeCart(data));
+      return data;
+    } catch (e) {
+      setError(e?.message || "Failed to clear cart");
+      throw e;
+    } finally {
+      setUpdating(false);
+    }
+  }, []);
+
+  // 中文注释：提供给外部消费的 value（useMemo 防止无意义重渲染）
   const value = useMemo(
     () => ({
       cart,
       loading,
+      updating,
       error,
       refreshCart,
       addItem,
       updateItem,
+      removeItem,
       clear,
     }),
-    [cart, loading, error, refreshCart, addItem, updateItem, clear]
+    [cart, loading, updating, error, refreshCart, addItem, updateItem, removeItem, clear]
   );
 
-  // 中文注释：这里不能用 JSX（因为当前文件是 .js），改用 React.createElement 避免 Vite 解析错误
+  // ❗不能用 JSX（因为这是 .js 文件），用 createElement 返回
   return React.createElement(CartContext.Provider, { value }, children);
 }
 
 export function useCart() {
   const ctx = useContext(CartContext);
-  if (!ctx) {
-    throw new Error("useCart must be used inside <CartProvider>");
-  }
+  if (!ctx) throw new Error("useCart must be used inside <CartProvider>");
   return ctx;
 }

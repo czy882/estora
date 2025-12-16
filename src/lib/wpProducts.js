@@ -1,30 +1,30 @@
 // src/lib/wpProducts.js
-// 说明：前端不要直接打 /wc/v3/products（会暴露 key）
-// 而是请求你自己的 /api/products 代理（服务端再去请求 WooCommerce）
+// 中文注释：通过 WooCommerce Store API 按 slug 获取产品（避免走本地 /api 造成 404）
 
+import { http } from "./http";
+
+// 中文注释：Woo Store API 基址（优先用 env，否则走站点的 /wp-json/wc/store/v1）
+const WC_STORE_BASE =
+  import.meta.env.VITE_WC_STORE_API || "/wp-json/wc/store/v1";
+
+/**
+ * 中文注释：按 slug 获取单个产品
+ * - Woo Store API 支持：GET /products?slug={slug}
+ * - 返回通常是数组（可能为空）
+ */
 export async function fetchProductBySlug(slug) {
-    const res = await fetch(`/api/products?slug=${encodeURIComponent(slug)}`, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
-  
-    if (!res.ok) return null;
-  
-    const data = await res.json();
-  
-    // 兼容后端返回单个 product 或数组
-    const p = Array.isArray(data) ? data?.[0] : data;
-    if (!p) return null;
-  
-    return {
-      id: p.id,
-      name: p.name,
-      slug: p.slug,
-      permalink: p.permalink, // ✅ Woo 原生产品页链接
-      price: p.price,
-      images: (p.images || []).map((i) => ({
-        src: i?.src || i,
-        alt: p.name,
-      })),
-    };
-  }
+  const s = String(slug || "").trim();
+  if (!s) throw new Error("Missing slug");
+
+  const url = `${WC_STORE_BASE}/products?slug=${encodeURIComponent(s)}&per_page=1`;
+  const data = await http(url, { method: "GET" });
+
+  // 中文注释：Store API 返回是数组；极少数情况下也可能是 { products: [] }
+  const arr = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.products)
+      ? data.products
+      : [];
+
+  return arr[0] || null;
+}

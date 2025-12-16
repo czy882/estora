@@ -19,8 +19,8 @@ const Navbar = () => {
 
   // 产品链接配置 (修正为标准连字符路径，匹配 App.jsx)
   const productLinks = [
-    { label: 'Day Comfort', path: '/day_comfort' },
-    { label: 'Night Sanctuary', path: '/night_sanctuary' },
+    { label: 'Day Comfort', path: '/day-comfort' },
+    { label: 'Night Sanctuary', path: '/night-sanctuary' },
     { label: 'Overnight', path: '/overnight' },
     { label: 'Liners', path: '/liners' },
   ];

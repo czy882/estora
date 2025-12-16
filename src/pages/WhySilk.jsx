@@ -2,43 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Leaf, ShieldCheck, Heart, Sparkles, Droplets, Wind, Microscope } from 'lucide-react';
 import Button from '../components/Button';
+import FadeIn from "../components/FadeIn";
 import silkBg from '../assets/images/why_silk/silk_bg.png';
 import silkBgMobile from '../assets/images/why_silk/silk_bg_mobile.png';
-
-// --- 动画辅助组件：FadeIn ---
-const FadeIn = ({ children, delay = 0, className = "" }) => {
-  const [isVisible, setIsVisible] = useState(false);
-  const domRef = useRef();
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-        }
-      });
-    }, { threshold: 0.1 });
-
-    const { current } = domRef;
-    if (current) observer.observe(current);
-
-    return () => {
-      if (current) observer.unobserve(current);
-    }
-  }, []);
-
-  return (
-    <div
-      ref={domRef}
-      className={`transition-all duration-[1500ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform transform ${
-        isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-16'
-      } ${className}`}
-      style={{ transitionDelay: `${delay}ms` }}
-    >
-      {children}
-    </div>
-  );
-};
 
 const WhySilk = () => {
   const navigate = useNavigate();
